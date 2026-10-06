@@ -1823,6 +1823,14 @@
               + (params.table.applyParagraph ? ' · 同时统一行距与对齐' : ''),
         samples: [], fix: null });
     }
+    if (stats.chars < 30 && stats.images > 0) {
+      add({ id: 'image_only', category: '总览', level: 'high',
+        title: '文档内容是图片（扫描件 / 截图），没有可编辑文字', count: stats.images,
+        detail: '这份文档的文字是"画"在图片里的，不是真正的文字，任何排版工具都无法修改其中的文字内容。'
+              + '请先用 OCR 把它转成可编辑文字（Word：「图片转文字」；WPS：「PDF/图片转文字」；'
+              + '微信/QQ：长按图片「提取文字」；或 ABBYY 等工具），转出来的 Word 再拿来整改排版。',
+        samples: [], fix: null });
+    }
     if (!findings.length) {
       add({ id: 'ok', category: '总览', level: 'info', title: '未发现明显的排版问题', count: 0,
         detail: '文档排版已较为规范，仍可套用模板进行统一微调。', samples: [], fix: null });

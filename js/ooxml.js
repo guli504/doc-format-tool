@@ -413,14 +413,22 @@
       }
     });
 
-    // 统计基本信息
+    // 统计基本信息（含"是不是图片版文档"的判断依据）
     var body = doc.xml.getElementsByTagNameNS(NS.w, 'body')[0] || doc.xml.documentElement;
+    var bodyParas = body.getElementsByTagNameNS(NS.w, 'p');
+    var chars = 0;
+    for (var i = 0; i < bodyParas.length; i++) {
+      chars += paraText(bodyParas[i], false).replace(/[\s\u3000]/g, '').length;
+    }
     doc.stats = {
-      paragraphs: body.getElementsByTagNameNS(NS.w, 'p').length,
+      paragraphs: bodyParas.length,
       tables: body.getElementsByTagNameNS(NS.w, 'tbl').length,
       images: Object.keys(doc.images).length,
-      characters: 0
+      drawings: body.getElementsByTagNameNS(NS.w, 'drawing').length +
+                body.getElementsByTagNameNS(NS.w, 'pict').length,
+      characters: chars
     };
+    doc.stats.imageOnly = (chars < 30 && doc.stats.drawings > 0);
     return doc;
   }
 

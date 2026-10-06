@@ -205,7 +205,9 @@ label.inline.mid { margin-top: 18px; }
 .file-meta { color: var(--text-3); font-size: 11px; }
 .file-x { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: 0 2px; }
 .file-x:hover { color: var(--danger); }
-.hint { font-size: 11.5px; color: var(--warn); margin-top: 8px; line-height: 1.5; }
+.hint { font-size: 11.5px; color: var(--warn); margin-top: 8px; line-height: 1.6; }
+.hint:empty { display: none; }
+.hint b { color: #b35c00; }
 
 /* 模板 */
 .tpl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 9px; }

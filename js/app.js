@@ -253,7 +253,8 @@
         if (kind === 'docx') doc = await O.open(buf, f.name);
         else doc = await Legacy.convert(buf, f.name);
         doc.size = f.size;
-        state.files.push({
+        var st = doc.stats || {};
+        var fobj = {
           id: 'f' + Date.now() + '_' + i,
           name: f.name,
           size: f.size,
@@ -263,10 +264,13 @@
           report: null,
           findings: null,
           kind: kind,
+          imageOnly: !!st.imageOnly,
           manualPages: [],     // 手动勾选"不整改"的页
           manualParas: [],     // 手动点选"不整改"的段落
           pages: null          // 扫描出的页面清单
-        });
+        };
+        if (st.imageOnly) fobj.status = '⚠ 内容是图片';
+        state.files.push(fobj);
         if (doc.convertNote) toast(doc.convertNote, null, 3600);
       } catch (e) {
         console.error(e);
@@ -285,6 +289,32 @@
       renderOriginalPreview();
       toast('已导入 ' + state.files.length + ' 个文件，点击“一键整改”开始', 'ok');
     }
+    updateImageOnlyHint();
+  }
+
+  /** 图片版文档提示：内容全是图片时，如实告知，避免"整改完发现没用" */
+  function updateImageOnlyHint() {
+    var hint = $('#importHint');
+    if (!hint) return;
+    var bad = state.files.filter(function (f) { return f.imageOnly; });
+    var partial = state.files.filter(function (f) {
+      return !f.imageOnly && f.doc && f.doc.stats && f.doc.stats.characters > 0 &&
+             f.doc.stats.drawings > 0 && f.doc.stats.characters < 200;
+    });
+    if (!bad.length && !partial.length) { hint.innerHTML = ''; return; }
+    var html = '';
+    if (bad.length) {
+      html += '⚠ <b>检测到 ' + bad.length + ' 个文件的内容是图片（扫描件 / 截图），里面没有可编辑文字</b>：' +
+        '这类文档的文字是"画"在图上的，任何排版工具都改不了其中的文字 —— 导出的文件当然还是图片。<br>' +
+        '请先做 OCR 转成可编辑文字再整改：Word「图片转文字」/ WPS「PDF、图片转文字」/ 微信长按图片「提取文字」/ ABBYY 等。<br>' +
+        '受影响：' + bad.map(function (f) { return Render.escapeHtml(f.name); }).join('、');
+    }
+    if (partial.length) {
+      if (html) html += '<br>';
+      html += 'ℹ 这些文件文字很少但图片较多（可能是图文混排或部分扫描页）：' +
+        partial.map(function (f) { return Render.escapeHtml(f.name); }).join('、');
+    }
+    hint.innerHTML = html;
   }
 
   function renderFileUI() {
