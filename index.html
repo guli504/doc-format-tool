@@ -468,6 +468,17 @@
           <label class="inline"><input type="checkbox" data-param="range.protectRefs" data-type="bool"> 豁免参考文献（从"参考文献"标题到文末）</label>
           <label class="inline"><input type="checkbox" data-param="range.protectAppendix" data-type="bool"> 豁免附录 / 致谢（从标题到文末）</label>
           <label class="inline"><input type="checkbox" data-param="range.highlight" data-type="bool"> 在原文档预览中高亮"不会被整改"的区域</label>
+          <div class="subsec"><div class="sub-title">手动标记"不整改"的页面 <span class="sec-tag" id="manualCount">未标记</span></div>
+            <p class="note">自动识别不到的页面，在这里手动勾选 —— <b>凡是被标记的页面，连标点、空格、行距、页边距都不会改</b>。
+              也可以用「🖱 点选标记」在原文档预览里直接点击某个段落来标记。</p>
+            <div class="row">
+              <button class="btn btn-mini" id="btnScanPages">扫描页面</button>
+              <button class="btn btn-mini" id="btnAllPages">全选</button>
+              <button class="btn btn-mini" id="btnNoPages">全不选</button>
+              <button class="btn btn-mini btn-danger-ghost" id="btnClearMark">清空手动标记</button>
+            </div>
+            <div class="page-list" id="pageList"><span class="note">导入文档后点「扫描页面」列出全部页面。</span></div>
+          </div>
           <div class="subsec"><div class="sub-title">分节差异化（发现 <b id="secCount">-</b> 个分节）</div>
             <p class="note">可让某个分节完全不整改，或单独套用另一套模板（例如正文用宋体、附录用仿宋）。</p>
             <div id="sectionRules"></div>
@@ -550,6 +561,9 @@
       <div class="pane" id="paneOriginal">
         <div class="pane-label">原文档预览
           <span class="skip-legend" id="skipLegend" hidden><i></i>黄色斜纹区域本次不会被整改</span>
+          <span class="tb-flex"></span>
+          <button class="btn btn-mini" id="btnMarkMode" title="打开后在预览里点击任意段落，即可把它标记为“不整改”或取消标记">🖱 点选标记</button>
+          <span class="pane-hint" id="markHint"></span>
         </div>
         <div class="page-host" id="hostOriginal"><div class="empty-state">导入文档后在此显示原文档</div></div>
       </div>

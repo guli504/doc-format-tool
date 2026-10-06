@@ -1301,6 +1301,18 @@
         for (var a3 = 0; a3 < n; a3++) if (sectionOf[a3] === sec) mark(list[a3], 'sectionRule');
       }
     });
+    /* 手动标记：勾选的页面 / 段落一律不整改（优先级最高，不受其他设置影响） */
+    var manPages = r.manualPages || [];
+    if (manPages.length) {
+      var mset = new Set(manPages.map(Number));
+      for (var m3 = 0; m3 < n; m3++) if (mset.has(pageOf[m3])) mark(list[m3], 'manualPage');
+    }
+    var manParas = r.manualParas || [];
+    if (manParas.length) {
+      var pset2 = new Set(manParas.map(Number));
+      for (var m4 = 0; m4 < n; m4++) if (pset2.has(m4)) mark(list[m4], 'manualPara');
+    }
+
     /* 哪些分节被整节排除（用于决定是否还改它的页边距） */
     plan.sectionsExcluded = new Set();
     var secCount = {}, secSkipped = {};
@@ -1331,6 +1343,43 @@
       return params;
     };
     return plan;
+  }
+
+  /**
+   * 列出文档中的"页"（按分页符 / Word 记录的分页位置划分），并给出每页摘要，
+   * 供界面做"手动勾选哪些页不整改"。
+   * @returns {Array} [{ page, count, chars, summary, blank }]
+   */
+  function pageSummary(xmlDoc) {
+    var all = xmlDoc.getElementsByTagNameNS(W, 'p');
+    var pages = [], cur = [], page = 1;
+    var buckets = [{ page: 1, paras: [] }];
+    for (var i = 0; i < all.length; i++) {
+      var p = all[i];
+      buckets[buckets.length - 1].paras.push(p);
+      var brk = 0;
+      var brs = p.getElementsByTagNameNS(W, 'br');
+      for (var b = 0; b < brs.length; b++) {
+        var ty = O.wval(brs[b]) || brs[b].getAttribute('w:type');
+        if (ty === 'page') brk++;
+      }
+      if (p.getElementsByTagNameNS(W, 'lastRenderedPageBreak').length) brk++;
+      for (var k = 0; k < brk; k++) {
+        page++;
+        buckets.push({ page: page, paras: [] });
+      }
+    }
+    return buckets.map(function (bk) {
+      var txt = bk.paras.map(function (p) { return O.paraText(p, false).replace(/\s+/g, ' ').trim(); })
+        .filter(Boolean).join(' ');
+      return {
+        page: bk.page,
+        count: bk.paras.length,
+        chars: txt.length,
+        blank: txt.length === 0,
+        summary: txt.slice(0, 70)
+      };
+    });
   }
 
   /* ============================ 主处理流程 ============================ */
@@ -1792,7 +1841,8 @@
       transformChars: transformChars, paraIsEmpty: paraIsEmpty,
       tableContext: tableContext, collectScriptRuns: collectScriptRuns,
       buildRangePlan: buildRangePlan, parseNumSpec: parseNumSpec, isTocLike: isTocLike,
-      isNumericCellText: isNumericCellText, textWidthTwips: textWidthTwips
+      isNumericCellText: isNumericCellText, textWidthTwips: textWidthTwips,
+      pageSummary: pageSummary
     }
   };
 })(typeof window !== 'undefined' ? window : this);

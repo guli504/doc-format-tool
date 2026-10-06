@@ -23,6 +23,7 @@
     busy: false,
     view: 'split',
     zoom: 1,
+    markMode: false,
     autoTimer: null,
     lastRunAt: 0
   };
@@ -261,7 +262,10 @@
           blob: null,
           report: null,
           findings: null,
-          kind: kind
+          kind: kind,
+          manualPages: [],     // 手动勾选"不整改"的页
+          manualParas: [],     // 手动点选"不整改"的段落
+          pages: null          // 扫描出的页面清单
         });
         if (doc.convertNote) toast(doc.convertNote, null, 3600);
       } catch (e) {
@@ -277,6 +281,7 @@
     updateButtons();
     if (state.files.length) {
       refreshSectionRules();
+      scanPages(true);
       renderOriginalPreview();
       toast('已导入 ' + state.files.length + ' 个文件，点击“一键整改”开始', 'ok');
     }
@@ -303,6 +308,16 @@
 
   function activeFile() {
     return state.files.filter(function (f) { return f.id === state.activeId; })[0] || null;
+  }
+
+  /** 切换当前文件后：刷新文件区、页面清单、预览 */
+  function afterActiveChange() {
+    var f = activeFile();
+    if (f && !f.pages) scanPages(true); else renderPageList();
+    refreshSectionRules();
+    renderFileUI();
+    reRenderAll();
+    updateManualCount();
   }
 
   function updateButtons() {
@@ -354,13 +369,81 @@
   }
 
   /** 计算"不会被整改"的段落集合，供预览高亮 */
-  function rangeHighlight(f) {
-    if (!f || !state.params.range || state.params.range.highlight === false) return null;
+  function rangeHighlight(f, params) {
+    if (!f) return null;
+    var p = params || paramsForFile(f);
+    if (!p.range || p.range.highlight === false) return null;
     try {
-      var plan = Engine._internals.buildRangePlan(f.doc.xml, state.params, f.doc);
+      var plan = Engine._internals.buildRangePlan(f.doc.xml, p, f.doc);
       if (!plan.skip.size) return null;
-      return { set: plan.skip, reason: function (p) { return plan.reasonOf.get(p) || ''; }, count: plan.skip.size };
+      return { set: plan.skip, reason: function (x) { return plan.reasonOf.get(x) || ''; }, count: plan.skip.size };
     } catch (e) { return null; }
+  }
+
+  /** 每个文件独立的参数（注入该文件自己的手动标记：页面 / 段落） */
+  function paramsForFile(f) {
+    var p = Store.clone(state.params);
+    if (!p.range) p.range = Store.clone(DFT.DEFAULT_PARAMS.range);
+    p.range.manualPages = (f && f.manualPages) ? f.manualPages.slice() : [];
+    p.range.manualParas = (f && f.manualParas) ? f.manualParas.slice() : [];
+    return p;
+  }
+
+  /** 段落序号表（与引擎的文档顺序一致），供预览点选标记使用 */
+  function paraIndexMapOf(doc) {
+    if (!doc._paraIndexMap) {
+      var m = new Map();
+      var all = doc.xml.getElementsByTagNameNS(O.NS.w, 'p');
+      for (var i = 0; i < all.length; i++) m.set(all[i], i);
+      doc._paraIndexMap = m;
+    }
+    return doc._paraIndexMap;
+  }
+
+  /* ---------- 手动标记：页面清单 ---------- */
+  function scanPages(silent) {
+    var f = activeFile();
+    if (!f) { if (!silent) toast('请先导入文档', 'err'); return; }
+    f.pages = Engine._internals.pageSummary(f.doc.xml);
+    renderPageList();
+    if (!silent) toast('共 ' + f.pages.length + ' 页，勾选不需要整改的页即可', 'ok');
+  }
+
+  function renderPageList() {
+    var host = document.getElementById('pageList');
+    if (!host) return;
+    var f = activeFile();
+    if (!f) {
+      host.innerHTML = '<span class="note">导入文档后点「扫描页面」列出全部页面。</span>';
+      updateManualCount();
+      return;
+    }
+    if (!f.pages) {
+      host.innerHTML = '<span class="note">点「扫描页面」列出全部页面，再勾选不需要整改的页。</span>';
+      updateManualCount();
+      return;
+    }
+    var marks = f.manualPages || [];
+    host.innerHTML = f.pages.map(function (pg) {
+      var on = marks.indexOf(pg.page) >= 0;
+      return '<label class="page-row' + (on ? ' protected' : '') + '" data-page="' + pg.page + '">' +
+        '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+        '<span class="pg-no">第 ' + pg.page + ' 页</span>' +
+        '<span class="pg-sum">' + Render.escapeHtml(pg.summary || '（空白页）') + '</span>' +
+        '<span class="pg-tag">' + (pg.blank ? '空白' : pg.count + ' 段') + '</span>' +
+        '</label>';
+    }).join('');
+    updateManualCount();
+  }
+
+  function updateManualCount() {
+    var f = activeFile();
+    var n = f ? (f.manualPages || []).length : 0;
+    var m = f ? (f.manualParas || []).length : 0;
+    var el = document.getElementById('manualCount');
+    if (el) el.textContent = (n || m) ? ('已标记 ' + n + ' 页 / ' + m + ' 段') : '未标记';
+    var hint = document.getElementById('markHint');
+    if (hint) hint.textContent = state.markMode ? ('点选中：已标记 ' + m + ' 段') : '';
   }
 
   /* ============================== 预览渲染 ============================== */
@@ -377,7 +460,8 @@
     try {
       var styleMap = Render.buildStyleMap(f.doc.stylesRaw);
       f.doc.styleMap = styleMap;
-      var hl = rangeHighlight(f);
+      var pp = paramsForFile(f);
+      var hl = rangeHighlight(f, pp);
       var legend = $('#skipLegend');
       if (legend) {
         legend.hidden = !hl;
@@ -386,7 +470,8 @@
       var res = Render.render(f.doc, f.doc.xml, {
         styleMap: styleMap,
         skipSet: hl ? hl.set : null,
-        skipReason: hl ? hl.reason : null
+        skipReason: hl ? hl.reason : null,
+        paraIndexMap: paraIndexMapOf(f.doc)
       });
       host.innerHTML = '<div class="page" style="' + pageStyleCss(res.page, state.zoom) + '">' + res.html + '</div>';
     } catch (e) {
@@ -438,7 +523,7 @@
         f.status = '整改中';
         renderFileUI();
         var base = Math.round((i / state.files.length) * 100);
-        var res = await Engine.process(f.doc, params, function (pct, msg) {
+        var res = await Engine.process(f.doc, paramsForFile(f), function (pct, msg) {
           setProgress(base + Math.round(pct / state.files.length), '[' + f.name + '] ' + msg);
           $('#progressText').textContent = '[' + f.name + '] ' + msg;
         });
@@ -731,6 +816,80 @@
       });
     }
 
+    /* 手动标记：页面清单 + 预览点选 */
+    var pageList = document.getElementById('pageList');
+    if (pageList) {
+      pageList.addEventListener('change', function (e) {
+        var row = e.target.closest('[data-page]');
+        if (!row || e.target.tagName !== 'INPUT') return;
+        var f = activeFile(); if (!f) return;
+        var pg = parseInt(row.dataset.page, 10);
+        var arr = f.manualPages || [];
+        var idx = arr.indexOf(pg);
+        if (e.target.checked && idx < 0) arr.push(pg);
+        if (!e.target.checked && idx >= 0) arr.splice(idx, 1);
+        f.manualPages = arr;
+        row.classList.toggle('protected', e.target.checked);
+        updateManualCount();
+        renderOriginalPreview();
+        scheduleAutoRun();
+      });
+    }
+    var btnScan = document.getElementById('btnScanPages');
+    if (btnScan) btnScan.addEventListener('click', function () { scanPages(false); });
+    var btnAll = document.getElementById('btnAllPages');
+    if (btnAll) btnAll.addEventListener('click', function () {
+      var f = activeFile(); if (!f) return toast('请先导入文档', 'err');
+      if (!f.pages) scanPages(true);
+      f.manualPages = (f.pages || []).map(function (p) { return p.page; });
+      renderPageList(); renderOriginalPreview(); scheduleAutoRun();
+      toast('已把全部 ' + f.manualPages.length + ' 页标记为不整改', 'ok');
+    });
+    var btnNo = document.getElementById('btnNoPages');
+    if (btnNo) btnNo.addEventListener('click', function () {
+      var f = activeFile(); if (!f) return;
+      f.manualPages = [];
+      renderPageList(); renderOriginalPreview(); scheduleAutoRun();
+      toast('已取消全部页面标记');
+    });
+    var btnClear = document.getElementById('btnClearMark');
+    if (btnClear) btnClear.addEventListener('click', function () {
+      var f = activeFile(); if (!f) return;
+      f.manualPages = []; f.manualParas = [];
+      renderPageList(); renderOriginalPreview(); scheduleAutoRun();
+      toast('已清空全部手动标记', 'ok');
+    });
+    var markBtn = document.getElementById('btnMarkMode');
+    if (markBtn) markBtn.addEventListener('click', function () {
+      state.markMode = !state.markMode;
+      document.body.classList.toggle('mark-mode', state.markMode);
+      markBtn.classList.toggle('on', state.markMode);
+      updateManualCount();
+      toast(state.markMode
+        ? '点选标记已开启：在左侧「原文档预览」里点击段落即可标记 / 取消标记'
+        : '已退出点选标记', null, 3200);
+    });
+    var hostOrig = document.getElementById('hostOriginal');
+    if (hostOrig) {
+      hostOrig.addEventListener('click', function (e) {
+        if (!state.markMode) return;
+        var el = e.target.closest('[data-pi]');
+        if (!el) return;
+        var f = activeFile(); if (!f) return;
+        var pi = parseInt(el.dataset.pi, 10);
+        if (isNaN(pi)) return;
+        var arr = f.manualParas || [];
+        var idx = arr.indexOf(pi);
+        if (idx >= 0) { arr.splice(idx, 1); toast('已取消该段落的保护标记'); }
+        else { arr.push(pi); toast('已标记该段落：本次整改不会改动它', 'ok'); }
+        f.manualParas = arr;
+        updateManualCount();
+        renderOriginalPreview();
+        scheduleAutoRun();
+        e.preventDefault();
+      });
+    }
+
     $('#btnSaveTpl').addEventListener('click', function () {      var name = $('#tplName').value.trim();
       if (!name) return toast('请先输入模板名称', 'err');
       Store.upsertUserTemplate(name, '自定义模板', state.params);
@@ -801,15 +960,15 @@
         if (!state.files.some(function (f) { return f.id === state.activeId; })) {
           state.activeId = state.files[0] ? state.files[0].id : null;
         }
-        renderFileUI(); updateButtons(); reRenderAll();
+        renderFileUI(); updateButtons(); reRenderAll(); afterActiveChange();
         return;
       }
       var item = e.target.closest('[data-fid]');
-      if (item) { state.activeId = item.dataset.fid; renderFileUI(); reRenderAll(); }
+      if (item) { state.activeId = item.dataset.fid; afterActiveChange(); }
     });
     $('#fileBar').addEventListener('click', function (e) {
       var tab = e.target.closest('[data-fid]');
-      if (tab) { state.activeId = tab.dataset.fid; renderFileUI(); reRenderAll(); }
+      if (tab) { state.activeId = tab.dataset.fid; afterActiveChange(); }
     });
 
     /* 问题清单 */
@@ -925,6 +1084,7 @@
     setView(state.view);
     document.body.dataset.view = state.view;
     refreshSectionRules();
+    renderPageList();
     updateButtons();
     renderFileUI();
     console.log('%c文档格式批量整改工具 v' + DFT.VERSION + ' 已就绪（纯本地运行）', 'color:#2f6fed;font-weight:bold');

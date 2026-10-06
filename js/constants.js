@@ -100,6 +100,8 @@
       protectToc: true,          // 智能豁免目录
       protectRefs: false,        // 豁免参考文献
       protectAppendix: false,    // 豁免附录 / 致谢
+      manualPages: [],           // 手动勾选"不整改"的页码（按分页符划分）
+      manualParas: [],           // 手动标记"不整改"的段落序号
       sectionRules: {},          // { "2": { enabled:false } } 或 { "3": { templateId:"gov" } }
       highlight: true            // 原文档预览中高亮"不会被整改"的区域
     },

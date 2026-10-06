@@ -301,6 +301,22 @@ body[data-view="fixed"] #paneOriginal { display: none; }
 }
 .skip-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #a06400; }
 .skip-legend i { display: inline-block; width: 12px; height: 10px; background: #ffecb3; border-left: 3px solid #f0b429; }
+
+/* 手动标记页面清单 */
+.page-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--line-soft); border-radius: 7px; padding: 3px 6px; }
+.page-row { display: flex; align-items: flex-start; gap: 7px; padding: 4px 5px; border-bottom: 1px solid var(--line-soft); font-size: 12px; cursor: pointer; }
+.page-row:last-child { border-bottom: 0; }
+.page-row:hover { background: #f7f9fc; }
+.page-row.protected { background: #fff8e1; box-shadow: inset 3px 0 0 #f0b429; }
+.page-row input { margin-top: 3px; accent-color: var(--brand); flex: 0 0 auto; }
+.page-row .pg-no { flex: 0 0 auto; font-weight: 600; color: var(--text-2); min-width: 48px; }
+.page-row .pg-sum { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.page-row .pg-tag { flex: 0 0 auto; font-size: 10.5px; color: #a06400; white-space: nowrap; }
+
+/* 点选标记模式 */
+body.mark-mode .page-host p { cursor: crosshair; }
+body.mark-mode .page-host p:hover { outline: 2px dashed var(--brand); outline-offset: 1px; background: #eaf1ff !important; }
+.btn-mini.on { background: var(--brand); color: #fff; border-color: var(--brand); }
 .dft-comment { color: #e08a1e; font-size: .8em; vertical-align: super; }
 .empty-state { color: var(--text-3); text-align: center; margin-top: 48px; font-size: 12.5px; line-height: 1.8; }
 .empty-state.small { margin-top: 14px; }

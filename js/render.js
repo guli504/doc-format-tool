@@ -423,14 +423,21 @@
     var cls = [];
     var extraAttr = '';
     if (isHeading) cls.push('dft-h');
+    // 段落序号（与 getElementsByTagNameNS('p') 的顺序一致），供"点选标记"使用
+    if (ctx.paraIndexMap) {
+      var pi = ctx.paraIndexMap.get(p);
+      if (pi !== undefined) extraAttr += ' data-pi="' + pi + '"';
+    }
     // 整改范围保护：标记"不会被整改"的段落（原文档预览中高亮显示）
     if (ctx.skipSet && ctx.skipSet.has(p)) {
       cls.push('dft-skip');
       var reason = ctx.skipReason ? ctx.skipReason(p) : '';
       var tip = { cover: '封面页（受保护）', toc: '目录（受保护）', tail: '参考文献 / 附录（受保护）',
                   outOfPages: '不在指定页范围内', outOfSections: '不在指定分节范围内',
-                  sectionRule: '该分节已设为不整改' }[reason] || '不整改区域';
-      extraAttr = ' data-skip="1" title="' + tip + '：本次整改不会修改这里"';
+                  sectionRule: '该分节已设为不整改',
+                  manualPage: '你手动勾选为"不整改"的页面',
+                  manualPara: '你手动点选标记为"不整改"的段落' }[reason] || '不整改区域';
+      extraAttr += ' data-skip="1" title="' + tip + '：本次整改不会修改这里"';
     }
     var extraClass = cls.length ? ' class="' + cls.join(' ') + '"' : '';
     var cssStr = paraCss(paraProps);
@@ -537,7 +544,8 @@
     }
 
     var ctx = { doc: doc, styleMap: styleMap, listCounter: makeListCounter(doc, styleMap),
-                skipSet: opts.skipSet || null, skipReason: opts.skipReason || null };
+                skipSet: opts.skipSet || null, skipReason: opts.skipReason || null,
+                paraIndexMap: opts.paraIndexMap || null };
     var html = '';
     for (var i = 0; i < body.childNodes.length; i++) {
       var n = body.childNodes[i];
