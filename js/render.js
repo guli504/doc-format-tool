@@ -420,10 +420,22 @@
 
     var tag = 'p';
     var isHeading = /^Heading[1-9]$|^heading [1-9]$/i.test(styleId || '') || /^(标题|標題)\s*[1-9]$/.test(resolved.name || '');
-    var extraClass = isHeading ? ' class="dft-h"' : '';
+    var cls = [];
+    var extraAttr = '';
+    if (isHeading) cls.push('dft-h');
+    // 整改范围保护：标记"不会被整改"的段落（原文档预览中高亮显示）
+    if (ctx.skipSet && ctx.skipSet.has(p)) {
+      cls.push('dft-skip');
+      var reason = ctx.skipReason ? ctx.skipReason(p) : '';
+      var tip = { cover: '封面页（受保护）', toc: '目录（受保护）', tail: '参考文献 / 附录（受保护）',
+                  outOfPages: '不在指定页范围内', outOfSections: '不在指定分节范围内',
+                  sectionRule: '该分节已设为不整改' }[reason] || '不整改区域';
+      extraAttr = ' data-skip="1" title="' + tip + '：本次整改不会修改这里"';
+    }
+    var extraClass = cls.length ? ' class="' + cls.join(' ') + '"' : '';
     var cssStr = paraCss(paraProps);
     if (!inner) inner = '';
-    return '<' + tag + extraClass + ' style="' + cssStr + '">' + numPrefix + inner + '</' + tag + '>';
+    return '<' + tag + extraClass + extraAttr + ' style="' + cssStr + '">' + numPrefix + inner + '</' + tag + '>';
   }
 
   /* ============================ 表格渲染 ============================ */
@@ -524,7 +536,8 @@
       }
     }
 
-    var ctx = { doc: doc, styleMap: styleMap, listCounter: makeListCounter(doc, styleMap) };
+    var ctx = { doc: doc, styleMap: styleMap, listCounter: makeListCounter(doc, styleMap),
+                skipSet: opts.skipSet || null, skipReason: opts.skipReason || null };
     var html = '';
     for (var i = 0; i < body.childNodes.length; i++) {
       var n = body.childNodes[i];

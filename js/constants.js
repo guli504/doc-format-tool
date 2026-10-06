@@ -41,7 +41,7 @@
       table:   { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000' }  // 表格内数字
     },
 
-    /* 表格文字格式（独立于正文，可按需开启） */
+    /* 表格专项格式化（独立于正文，可按需开启） */
     table: {
       enabled: false,            // 关闭时：表格文字跟随正文设置；开启后使用下面的独立设置
       cnFont: '宋体',            // 表格中文字体
@@ -49,11 +49,59 @@
       size: 10.5,                // 表格字号(磅)
       bold: false,               // 表格文字加粗
       color: '#000000',          // 表格文字颜色
-      headerBold: true,          // 表头行（第一行 / 勾选了"重复标题行"的行）加粗
-      applyParagraph: false,     // 是否同时统一表格内段落的行距与对齐
+      headerBold: true,          // 表头行加粗
+      headerDetect: 'firstRow',  // firstRow(首行) | firstRowCol(首行+首列) | none
+      headerFill: '',            // 表头底色（空=不改），如 #DCE6F1
+      applyParagraph: false,     // 是否统一表格内段落的行距与对齐
       lineMode: 'multiple',      // multiple | fixed | atLeast
       lineValue: 1.0,
-      align: ''                  // '' 表示不改动；left | center | right | justify
+      align: '',                 // 单元格文字对齐：'' 不改动 | left | center | right | justify
+      /* —— 边框与线型 —— */
+      borderEnabled: false,
+      borderStyle: 'single',     // single(单线) | double(双线) | threeLine(三线表) | none(无边框)
+      borderSize: 6,             // 线宽，单位 1/8 磅（6 ≈ 0.75 磅）
+      borderColor: '#000000',
+      bodyFill: '',              // 表格主体底色（空=不改）
+      /* —— 行高 / 列宽 / 整体 —— */
+      rowHeightEnabled: false,
+      rowHeight: 0.8,            // 厘米
+      rowHeightRule: 'atLeast',  // atLeast(最小值) | exact(固定值) | auto(自动)
+      fitPage: true,             // 超出页宽时自动缩放适配页宽
+      tableAlign: '',            // 表格整体对齐：'' 不改动 | left | center | right
+      /* —— 数字对齐 —— */
+      numberAlign: 'none',       // none | center | right | decimal(小数点对齐)
+      /* —— 跨页表头 —— */
+      repeatHeader: true         // 跨页时重复表头行
+    },
+
+    /* 角标（上标 / 下标）智能识别与格式 */
+    script: {
+      enabled: true,
+      detectMarked: true,        // 识别带 vertAlign 标记的真角标（准确率 100%）
+      detectSmall: true,         // 智能识别"小字号、未标记"的假角标（如 cm3、m2、10^3）
+      mode: 'normalize',         // preserve(完全保留原样) | normalize(统一字号/基线，修正假角标)
+      sizeMode: 'follow',        // follow(跟随所在段落正文) | scale(正文的百分比) | fixed(固定磅值)
+      scale: 100,                // %
+      size: 9,                   // 固定磅值
+      font: '',                  // 空 = 保留原角标字体
+      color: '',                 // 空 = 保留原角标颜色
+      bold: false,               // 角标加粗
+      keepBold: true,            // 保留原加粗状态
+      manual: ''                 // 手动指定内容：分号/换行分隔，支持 /正则/
+    },
+
+    /* 整改范围（选择性保护，防止误改） */
+    range: {
+      enabled: true,             // 总开关：关闭后所有保护失效（全文都整改）
+      mode: 'all',               // all(全文) | pages(指定页) | sections(指定分节)
+      pages: '',                 // 例如 2-10,12,15-  （按文档中的分页符划分）
+      sections: '',              // 例如 2-4
+      protectCover: true,        // 智能豁免封面页
+      protectToc: true,          // 智能豁免目录
+      protectRefs: false,        // 豁免参考文献
+      protectAppendix: false,    // 豁免附录 / 致谢
+      sectionRules: {},          // { "2": { enabled:false } } 或 { "3": { templateId:"gov" } }
+      highlight: true            // 原文档预览中高亮"不会被整改"的区域
     },
 
     /* 标题层级标准化 */
@@ -293,6 +341,51 @@
   ];
 
   /* ---------------------------------------------------------------------------
+   * 2.1 内置 3 套表格模板（一键套用，只覆盖表格相关参数）
+   * ------------------------------------------------------------------------ */
+  var TABLE_TEMPLATES = [
+    {
+      id: 'threeLine',
+      name: '论文三线表',
+      desc: '顶线/底线较粗、表头下细线、无竖线无内横线；表头加粗居中、表体数字居中，跨页重复表头',
+      params: {
+        table: {
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '',
+          borderEnabled: true, borderStyle: 'threeLine', borderSize: 8, borderColor: '#000000',
+          tableAlign: 'center', numberAlign: 'center', repeatHeader: true, fitPage: true,
+          applyParagraph: true, align: 'center', lineMode: 'multiple', lineValue: 1.0
+        }
+      }
+    },
+    {
+      id: 'govTable',
+      name: '公文标准表',
+      desc: '全框线单线、四周边框加粗、表头加粗居中并填充浅蓝底色，正文数字居中',
+      params: {
+        table: {
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '#DCE6F1',
+          borderEnabled: true, borderStyle: 'single', borderSize: 6, borderColor: '#000000',
+          tableAlign: 'center', numberAlign: 'center', repeatHeader: true, fitPage: true,
+          applyParagraph: true, align: 'center', lineMode: 'multiple', lineValue: 1.0, size: 12
+        }
+      }
+    },
+    {
+      id: 'simpleTable',
+      name: '日常简约表',
+      desc: '仅上下框线 + 表头下线，无竖线；表头浅灰底加粗，表体左对齐、数字居中',
+      params: {
+        table: {
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '#F2F2F2',
+          borderEnabled: true, borderStyle: 'threeLine', borderSize: 4, borderColor: '#595959',
+          tableAlign: 'left', numberAlign: 'center', repeatHeader: true, fitPage: true,
+          applyParagraph: true, align: 'left', lineMode: 'multiple', lineValue: 1.15
+        }
+      }
+    }
+  ];
+
+  /* ---------------------------------------------------------------------------
    * 3. 内置字体库（用户可删除、收藏、新增；永久保存在 localStorage）
    * ------------------------------------------------------------------------ */
   var BUILTIN_FONTS = [
@@ -401,6 +494,7 @@
     VERSION: VERSION,
     DEFAULT_PARAMS: DEFAULT_PARAMS,
     TEMPLATES: TEMPLATES,
+    TABLE_TEMPLATES: TABLE_TEMPLATES,
     BUILTIN_FONTS: BUILTIN_FONTS,
     FONT_SIZES: FONT_SIZES,
     ALIGN_OPTIONS: ALIGN_OPTIONS,

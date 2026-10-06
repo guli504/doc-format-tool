@@ -71,8 +71,8 @@
     return true;
   }
 
-  /* 收集段落内（不含公式/文本框/图形/修订删除）的文本节点 */
-  function collectTextNodes(root) {
+  /* 收集段落内（不含公式/文本框/图形/修订删除）的文本节点；skip 中的 run 整体跳过（如角标） */
+  function collectTextNodes(root, skip) {
     var out = [];
     (function walk(node) {
       for (var i = 0; i < node.childNodes.length; i++) {
@@ -80,6 +80,7 @@
         if (n.nodeType !== 1) continue;
         var ln = O.localName(n), ns = n.namespaceURI;
         if (ns === M) continue;
+        if (ns === W && ln === 'r' && skip && skip.has(n)) continue;
         if (ln === 'del' || ln === 'moveFrom' || ln === 'delText' || ln === 'instrText' || ln === 'delInstrText') continue;
         if (ln === 'drawing' || ln === 'pict' || ln === 'object' || ln === 'txbxContent' || ln === 'ruby') continue;
         if (ns === W && ln === 't') { out.push(n); continue; }
@@ -180,10 +181,11 @@
    * 表头行 = 表格的第一行，或该行设置了“重复标题行”(w:tblHeader)。
    */
   function tableContext(p) {
-    var node = p.parentNode, tbl = null, tr = null;
+    var node = p.parentNode, tbl = null, tr = null, tc = null;
     while (node && node.nodeType === 1) {
       if (node.namespaceURI === W) {
         var ln = O.localName(node);
+        if (!tc && ln === 'tc') tc = node;
         if (!tr && ln === 'tr') tr = node;
         if (ln === 'tbl') { tbl = node; break; }
         if (ln === 'body' || ln === 'txbxContent' || ln === 'footnote' || ln === 'endnote') break;
@@ -191,14 +193,23 @@
       node = node.parentNode;
     }
     if (!tbl) return null;
-    var isHeader = false;
+    var rows = O.children(tbl, 'tr');
+    var rowIndex = -1;
+    if (tr) rowIndex = rows.indexOf(tr);
+    var isHeader = rowIndex === 0;
     if (tr) {
-      var rows = O.children(tbl, 'tr');
-      isHeader = rows.length > 0 && rows[0] === tr;
       var trPr = O.child(tr, 'trPr');
       if (trPr && O.child(trPr, 'tblHeader')) isHeader = true;
     }
-    return { isHeader: isHeader };
+    var isHeaderCol = false;
+    if (tc && tr) {
+      var cells = O.children(tr, 'tc');
+      isHeaderCol = cells.length > 0 && cells[0] === tc;
+    }
+    return {
+      table: tbl, row: tr, cell: tc, rows: rows,
+      rowIndex: rowIndex, isHeader: isHeader, isHeaderCol: isHeaderCol
+    };
   }
 
   /* ============================ 字符数组标点整改 ============================ */
@@ -378,14 +389,15 @@
     return O.children(parent, 'p').length <= 1;
   }
 
-  /* ---------- 空行清理 ---------- */
-  function cleanEmptyParagraphs(list, params, report) {
+  /* ---------- 空行清理（受整改范围保护约束） ---------- */
+  function cleanEmptyParagraphs(list, params, report, plan) {
     if (!params.whitespace.enabled || !params.whitespace.removeEmpty) return;
     var maxEmpty = Math.max(0, parseInt(params.whitespace.maxEmpty, 10) || 0);
     var consecutive = 0;
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
       if (!p.parentNode) continue;
+      if (plan && plan.skip.has(p)) { consecutive = 0; continue; }   // 保护区域不动
       var empty = paraIsEmpty(p);
       if (!empty) { consecutive = 0; continue; }
       var mustRemoveByBreak = params.whitespace.removePageBreakInEmpty && paraHasPageBreak(p);
@@ -401,10 +413,10 @@
   }
 
   /* ---------- 空格清理 ---------- */
-  function cleanSpaces(p, params, report) {
+  function cleanSpaces(p, params, report, skipRuns) {
     var ws = params.whitespace;
     if (!ws.enabled) return;
-    var nodes = collectTextNodes(p);
+    var nodes = collectTextNodes(p, skipRuns);
     if (!nodes.length) return;
     for (var i = 0; i < nodes.length; i++) {
       var t = nodes[i];
@@ -421,9 +433,9 @@
   }
 
   /* ---------- 标点整改 ---------- */
-  function fixPunctuation(p, params, report) {
+  function fixPunctuation(p, params, report, skipRuns) {
     if (!params.punctuation.enabled) return;
-    var nodes = collectTextNodes(p);
+    var nodes = collectTextNodes(p, skipRuns);
     if (!nodes.length) return;
     var chars = [];
     for (var i = 0; i < nodes.length; i++) {
@@ -550,14 +562,30 @@
     return segs;
   }
 
-  function processRuns(p, ctx, params, report) {
+  function processRuns(p, ctx, params, report, scriptMap) {
     var runs = collectRuns(p);
     var digitSplit = params.digit.enabled;
+    var baseSize = contextFonts(ctx, params).size;
     for (var i = 0; i < runs.length; i++) {
       var run = runs[i];
       if (!run.parentNode) continue;
       if (runHasField(run)) continue;
       if (run.getElementsByTagNameNS(W, 'drawing').length) continue;
+
+      // 角标：先套用所在上下文的字体/颜色，再按角标规则统一字号与基线，
+      // 绝不套用正文的字号，避免角标被改大变形、和正文混为一体。
+      if (scriptMap && scriptMap.size) {
+        var stype = scriptMap.get(run);
+        if (stype) {
+          if (params.script.mode !== 'preserve') {
+            var stTxt = runPlainText(run);
+            applyClassFormat(run, charClass(stTxt.replace(/\s/g, '').charAt(0) || 'cjk'), ctx, params);
+            applyScriptFormat(run, stype, baseSize, params);
+          }
+          report.scripts++;
+          continue;
+        }
+      }
 
       // 收集该 run 的文本子节点与其它内容
       var textNodes = [], hasOther = false;
@@ -727,11 +755,59 @@
     'w:formProt', 'w:vAlign', 'w:noEndnote', 'w:titlePg', 'w:textDirection', 'w:bidi', 'w:rtlGutter',
     'w:docGrid', 'w:printerSettings', 'w:sectPrChange'];
 
-  function applyPageSetup(xmlDoc, params, report) {
+  /* 表格相关元素的架构顺序（必须按此顺序插入，否则 Word 会忽略或报错） */
+  var TBLPR_ORDER = ['w:tblStyle', 'w:tblpPr', 'w:tblOverlap', 'w:bidiVisual', 'w:tblStyleRowBandSize',
+    'w:tblStyleColBandSize', 'w:tblW', 'w:jc', 'w:tblCellSpacing', 'w:tblInd', 'w:tblBorders', 'w:shd',
+    'w:tblLayout', 'w:tblCellMar', 'w:tblLook', 'w:tblCaption', 'w:tblDescription'];
+  var TRPR_ORDER = ['w:cnfStyle', 'w:divId', 'w:gridBefore', 'w:gridAfter', 'w:wBefore', 'w:wAfter',
+    'w:cantSplit', 'w:trHeight', 'w:tblHeader', 'w:tblCellSpacing', 'w:jc', 'w:hidden'];
+  var TCPR_ORDER = ['w:cnfStyle', 'w:tcW', 'w:gridSpan', 'w:hMerge', 'w:vMerge', 'w:tcBorders', 'w:shd',
+    'w:noWrap', 'w:tcMar', 'w:textDirection', 'w:tcFitText', 'w:vAlign', 'w:hideMark'];
+  var BORDERS_ORDER = ['w:top', 'w:start', 'w:left', 'w:bottom', 'w:end', 'w:right', 'w:insideH',
+    'w:insideV', 'w:tl2br', 'w:tr2bl'];
+
+  /** w:tblPr 必须是 w:tbl 的第一个子元素 */
+  function ensureTblPr(tbl) {
+    var found = O.child(tbl, 'tblPr');
+    if (found) return found;
+    var e = O.el(tbl.ownerDocument, 'w:tblPr');
+    tbl.insertBefore(e, tbl.firstChild);
+    return e;
+  }
+  /** w:trPr 必须是 w:tr 的第一个子元素 */
+  function ensureTrPr(tr) {
+    var found = O.child(tr, 'trPr');
+    if (found) return found;
+    var e = O.el(tr.ownerDocument, 'w:trPr');
+    tr.insertBefore(e, tr.firstChild);
+    return e;
+  }
+  /** w:tcPr 必须是 w:tc 的第一个子元素 */
+  function ensureTcPr(tc) {
+    var found = O.child(tc, 'tcPr');
+    if (found) return found;
+    var e = O.el(tc.ownerDocument, 'w:tcPr');
+    tc.insertBefore(e, tc.firstChild);
+    return e;
+  }
+
+  function applyPageSetup(xmlDoc, params, report, plan) {
     if (!params.page.enabled) return;
     var sects = xmlDoc.getElementsByTagNameNS(W, 'sectPr');
     for (var i = 0; i < sects.length; i++) {
       var sect = sects[i];
+      // 整节被排除时，连页面设置也不动（页边距是节级属性）
+      if (plan && plan.sectionsExcluded && plan.sectionsExcluded.size) {
+        var owner = sect.parentNode;
+        var secIdx = null;
+        if (owner && owner.nodeType === 1 && O.isW(owner, 'p')) {
+          var pi = plan.idxOf.get(owner);
+          if (pi !== undefined) secIdx = plan.sectionOf[pi];
+        } else {
+          secIdx = plan.sections;
+        }
+        if (secIdx !== null && plan.sectionsExcluded.has(secIdx)) continue;
+      }
       var pgMar = null;
       var kids = sect.childNodes;
       for (var j = 0; j < kids.length; j++) {
@@ -755,6 +831,508 @@
     }
   }
 
+  /* ======================= 表格专项格式化 ======================= */
+  /** 计算正文可用宽度（缇），用于判断表格是否超出页宽 */
+  function textWidthTwips(xmlDoc, params) {
+    var sect = xmlDoc.getElementsByTagNameNS(W, 'sectPr')[0];
+    var pw = 11906, ph = 16838;   // A4 默认
+    if (sect) {
+      var pgSz = O.child(sect, 'pgSz');
+      if (pgSz) {
+        var wv = parseFloat(pgSz.getAttributeNS(W, 'w') || pgSz.getAttribute('w:w'));
+        var hv = parseFloat(pgSz.getAttributeNS(W, 'h') || pgSz.getAttribute('w:h'));
+        if (wv) pw = wv;
+        if (hv) ph = hv;
+        var orient = pgSz.getAttributeNS(W, 'orient') || pgSz.getAttribute('w:orient');
+        if (orient === 'landscape' && pw < ph) { var t = pw; pw = ph; ph = t; }
+      }
+    }
+    var left = params.page.enabled ? twipsCm(params.page.left) : 1797;
+    var right = params.page.enabled ? twipsCm(params.page.right) : 1797;
+    return Math.max(1000, pw - left - right);
+  }
+
+  function setBorderEdge(parent, qname, val, size, color) {
+    var e = O.ensureChild(parent, qname, BORDERS_ORDER);
+    O.attr(e, 'w:val', val);
+    O.attr(e, 'w:sz', String(Math.max(0, size)));
+    O.attr(e, 'w:space', '0');
+    O.attr(e, 'w:color', color);
+    return e;
+  }
+
+  /** 一键统一表格边框线型 */
+  function applyTableBorders(tbl, tblPr, rows, t) {
+    var sz = Math.max(2, Math.min(48, parseInt(t.borderSize, 10) || 6));
+    var col = hexColor(t.borderColor);
+    var style = t.borderStyle || 'single';
+
+    // 先清掉单元格自身边框，避免覆盖表格级统一设置（不动 gridSpan / vMerge）
+    rows.forEach(function (tr) {
+      O.children(tr, 'tc').forEach(function (tc) {
+        var tcPr = O.child(tc, 'tcPr');
+        if (tcPr) O.removeChildren(tcPr, 'tcBorders');
+      });
+    });
+
+    var b = O.ensureChild(tblPr, 'w:tblBorders', TBLPR_ORDER);
+    while (b.firstChild) b.removeChild(b.firstChild);
+
+    var edges = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'];
+    if (style === 'none') {
+      edges.forEach(function (n) { setBorderEdge(b, 'w:' + n, 'none', 0, 'auto'); });
+      return;
+    }
+    if (style === 'threeLine') {
+      setBorderEdge(b, 'w:top', 'single', sz, col);
+      setBorderEdge(b, 'w:bottom', 'single', sz, col);
+      setBorderEdge(b, 'w:left', 'none', 0, 'auto');
+      setBorderEdge(b, 'w:right', 'none', 0, 'auto');
+      setBorderEdge(b, 'w:insideH', 'none', 0, 'auto');
+      setBorderEdge(b, 'w:insideV', 'none', 0, 'auto');
+      // 表头行下方细线（三线表的中线）
+      if (rows[0] && t.headerDetect !== 'none') {
+        O.children(rows[0], 'tc').forEach(function (tc) {
+          var tb = O.ensureChild(ensureTcPr(tc), 'w:tcBorders', TCPR_ORDER);
+          setBorderEdge(tb, 'w:bottom', 'single', Math.max(2, Math.round(sz / 2)), col);
+        });
+      }
+      return;
+    }
+    var val = (style === 'double') ? 'double' : 'single';
+    edges.forEach(function (n) { setBorderEdge(b, 'w:' + n, val, sz, col); });
+  }
+
+  /** 表头底色 / 表格整体底色（只改格式，不动数据） */
+  function applyTableShading(rows, t) {
+    var headerFill = String(t.headerFill || '').replace('#', '');
+    var bodyFill = String(t.bodyFill || '').replace('#', '');
+    if (!headerFill && !bodyFill) return;
+    rows.forEach(function (tr, ri) {
+      var isHeader = ri === 0 && t.headerDetect !== 'none';
+      var fill = isHeader ? headerFill : bodyFill;
+      if (!fill) return;
+      O.children(tr, 'tc').forEach(function (tc) {
+        var shd = O.ensureChild(ensureTcPr(tc), 'w:shd', TCPR_ORDER);
+        O.attr(shd, 'w:val', 'clear');
+        O.attr(shd, 'w:color', 'auto');
+        O.attr(shd, 'w:fill', fill);
+      });
+    });
+  }
+
+  /** 统一行高 */
+  function applyRowHeights(rows, t) {
+    var rule = t.rowHeightRule || 'atLeast';
+    var h = Math.round((parseFloat(t.rowHeight) || 0.8) * 567);
+    rows.forEach(function (tr) {
+      var trPr = ensureTrPr(tr);
+      var exist = O.child(trPr, 'w:trHeight');
+      if (rule === 'auto') { if (exist) trPr.removeChild(exist); return; }
+      var e = O.ensureChild(trPr, 'w:trHeight', TRPR_ORDER);
+      O.attr(e, 'w:val', String(h));
+      O.attr(e, 'w:hRule', rule === 'exact' ? 'exact' : 'atLeast');
+    });
+  }
+
+  /** 表格宽度适配页宽（超出时按比例缩放列宽，保留合并单元格结构） */
+  function fitTableToPage(tbl, tblPr, textWidth) {
+    var w = O.ensureChild(tblPr, 'w:tblW', TBLPR_ORDER);
+    O.attr(w, 'w:w', '5000');
+    O.attr(w, 'w:type', 'pct');
+    var layout = O.ensureChild(tblPr, 'w:tblLayout', TBLPR_ORDER);
+    O.attr(layout, 'w:type', 'autofit');
+
+    var grid = O.child(tbl, 'tblGrid');
+    if (!grid || !textWidth) return false;
+    var cols = O.children(grid, 'gridCol');
+    if (!cols.length) return false;
+    var widths = cols.map(function (c) {
+      return parseFloat(c.getAttributeNS(W, 'w') || c.getAttribute('w:w') || 0) || 0;
+    });
+    var total = widths.reduce(function (a, b) { return a + b; }, 0);
+    if (total <= 0 || total <= textWidth) return false;   // 没超出页宽就不动列宽
+
+    var scale = textWidth / total;
+    cols.forEach(function (c, i) { O.attr(c, 'w:w', String(Math.round(widths[i] * scale))); });
+    // 同步单元格宽度（按 gridSpan 合并计算，不改变合并结构）
+    O.children(tbl, 'tr').forEach(function (tr) {
+      var idx = 0;
+      O.children(tr, 'tc').forEach(function (tc) {
+        var tcPr = O.child(tc, 'tcPr');
+        var span = 1;
+        if (tcPr) {
+          var gs = O.child(tcPr, 'gridSpan');
+          if (gs) span = parseInt(O.wval(gs), 10) || 1;
+        }
+        var sum = 0;
+        for (var k = 0; k < span; k++) sum += (widths[idx + k] || 0);
+        idx += span;
+        if (!tcPr) return;
+        var tcw = O.child(tcPr, 'w:tcW');
+        var type = tcw ? (tcw.getAttributeNS(W, 'type') || tcw.getAttribute('w:type') || 'dxa') : '';
+        if (tcw && (type === '' || type === 'dxa')) O.attr(tcw, 'w:w', String(Math.round(sum * scale)));
+      });
+    });
+    return true;
+  }
+
+  /** 数字对齐：居中 / 右对齐 / 小数点对齐（十进制制表位） */
+  var NUMERIC_CELL_RE = /^[-+±]?[0-9][0-9,，.]*\s*(%|％|‰|元|万元|亿元|个|人|年|月|日|次|项|分|秒|公斤|吨|千米|米|厘米|毫米|kg|g|t|km|cm|mm|㎡|m2|m3|℃|度)?$/;
+
+  function isNumericCellText(txt) {
+    var s = String(txt || '').trim();
+    if (!s || s.length > 24) return false;
+    return NUMERIC_CELL_RE.test(s);
+  }
+
+  function applyDecimalTab(tc, ps) {
+    var width = 0;
+    var tcPr = O.child(tc, 'tcPr');
+    if (tcPr) {
+      var tcw = O.child(tcPr, 'w:tcW');
+      if (tcw) width = parseFloat(tcw.getAttributeNS(W, 'w') || tcw.getAttribute('w:w') || 0) || 0;
+    }
+    var pos = Math.max(300, Math.round((width || 2000) - 113));   // 右侧留约 0.2cm
+    ps.forEach(function (p) {
+      var pPr = O.ensurePPr(p);
+      var tabs = O.ensureChild(pPr, 'w:tabs', O.PPR_ORDER);
+      while (tabs.firstChild) tabs.removeChild(tabs.firstChild);
+      var tab = O.el(p.ownerDocument, 'w:tab');
+      O.attr(tab, 'w:val', 'decimal');
+      O.attr(tab, 'w:pos', String(pos));
+      tabs.appendChild(tab);
+      var firstRun = O.children(p, 'r')[0];
+      if (!firstRun) return;
+      if (firstRun.firstElementChild && O.localName(firstRun.firstElementChild) === 'tab') return;
+      var run = O.el(p.ownerDocument, 'w:r');
+      run.appendChild(O.el(p.ownerDocument, 'w:tab'));
+      p.insertBefore(run, firstRun);
+    });
+  }
+
+  function applyNumberAlign(tbl, t) {
+    var mode = t.numberAlign;
+    if (!mode || mode === 'none') return 0;
+    var count = 0;
+    O.children(tbl, 'tr').forEach(function (tr) {
+      O.children(tr, 'tc').forEach(function (tc) {
+        var ps = O.children(tc, 'p');
+        if (!ps.length) return;
+        var txt = ps.map(function (p) { return O.paraText(p, false); }).join('').trim();
+        if (!isNumericCellText(txt)) return;
+        count++;
+        if (mode === 'decimal') { applyDecimalTab(tc, ps); return; }
+        ps.forEach(function (p) { setAlign(O.ensurePPr(p), mode); });
+      });
+    });
+    return count;
+  }
+
+  function applyRepeatHeader(tr) {
+    if (!tr) return;
+    var trPr = ensureTrPr(tr);
+    var e = O.ensureChild(trPr, 'w:tblHeader', TRPR_ORDER);
+    e.removeAttributeNS(W, 'val');
+  }
+
+  /** 表格专项整改主入口：只改格式，不动数据、合并单元格与行列结构 */
+  function applyTableFormat(tbl, params, textWidth, report) {
+    var t = params.table;
+    if (!t || !t.enabled) return;
+    var rows = O.children(tbl, 'tr');
+    if (!rows.length) return;
+    var tblPr = ensureTblPr(tbl);
+
+    if (t.tableAlign) {
+      var jc = O.ensureChild(tblPr, 'w:jc', TBLPR_ORDER);
+      O.attr(jc, 'w:val', t.tableAlign);
+    }
+    if (t.fitPage && fitTableToPage(tbl, tblPr, textWidth)) report.tablesScaled++;
+    if (t.borderEnabled) { applyTableBorders(tbl, tblPr, rows, t); report.tablesStyled++; }
+    applyTableShading(rows, t);
+    if (t.rowHeightEnabled) applyRowHeights(rows, t);
+    if (t.repeatHeader && t.headerDetect !== 'none') applyRepeatHeader(rows[0]);
+    report.cellsAligned += applyNumberAlign(tbl, t);
+  }
+
+  /* =================== 角标（上标 / 下标）智能识别 =================== */
+  function runPlainText(run) {
+    var out = '';
+    for (var i = 0; i < run.childNodes.length; i++) {
+      var n = run.childNodes[i];
+      if (n.nodeType === 1 && O.localName(n) === 't') out += n.textContent;
+    }
+    return out;
+  }
+
+  function parseManualTokens(str) {
+    if (!str) return [];
+    return String(str).split(/[;\n\r]+/).map(function (s) { return s.trim(); }).filter(Boolean)
+      .map(function (s) {
+        if (s.length > 2 && s.charAt(0) === '/' && s.charAt(s.length - 1) === '/') {
+          try { return new RegExp(s.slice(1, -1)); } catch (e) { return s; }
+        }
+        return s;
+      });
+  }
+
+  function manualHit(txt, tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i];
+      if (t instanceof RegExp) { if (t.test(txt)) return true; }
+      else if (txt === t) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 识别段落内的角标 run。
+   * 1) 带 w:vertAlign 的真角标（准确率 100%）；
+   * 2) 手动指定的内容（精确匹配或 /正则/）；
+   * 3) 智能识别"小字号未标记"的假角标（如 cm3、m2、10 3 被排成小字）。
+   * @returns {Map} run → 'sup' | 'sub'
+   */
+  function collectScriptRuns(p, params) {
+    var map = new Map();
+    var s = params.script;
+    if (!s || !s.enabled) return map;
+    var runs = collectRuns(p);
+    if (!runs.length) return map;
+
+    var sizes = [];
+    runs.forEach(function (r) {
+      var rPr = O.getRPr(r); if (!rPr) return;
+      var sz = O.child(rPr, 'sz');
+      if (sz) { var v = parseFloat(O.wval(sz)); if (v > 0) sizes.push(v); }
+    });
+    sizes.sort(function (a, b) { return a - b; });
+    var base = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0;
+    var tokens = parseManualTokens(s.manual);
+
+    runs.forEach(function (r) {
+      if (r.getElementsByTagNameNS(W, 'drawing').length) return;
+      if (runHasField(r)) return;
+      var rPr = O.getRPr(r);
+      var va = rPr ? O.child(rPr, 'vertAlign') : null;
+      var v = va ? O.wval(va) : '';
+      if (s.detectMarked && (v === 'superscript' || v === 'subscript')) {
+        map.set(r, v === 'subscript' ? 'sub' : 'sup');
+        return;
+      }
+      var txt = runPlainText(r);
+      if (!txt) return;
+      if (tokens.length && manualHit(txt.trim(), tokens)) { map.set(r, 'sup'); return; }
+      if (!s.detectSmall || !base) return;
+      if (txt.length > 4 || !/[0-9]/.test(txt) || /[\u4E00-\u9FFF]/.test(txt)) return;
+      var sz2 = rPr ? O.child(rPr, 'sz') : null;
+      var szv = sz2 ? parseFloat(O.wval(sz2)) : 0;
+      if (!szv || szv >= base * 0.85) return;    // 只认"明显偏小"的
+      map.set(r, 'sup');
+    });
+    return map;
+  }
+
+  /** 角标专属格式：统一字号比例、修正基线，不改变数字/符号内容 */
+  function applyScriptFormat(run, type, baseSizePt, params) {
+    var s = params.script;
+    var rPr = O.ensureRPr(run);
+    if (s.mode === 'normalize') {
+      var va = O.ensureChild(rPr, 'w:vertAlign');
+      if (!O.wval(va)) O.attr(va, 'w:val', type === 'sub' ? 'subscript' : 'superscript');
+    }
+    var size = null;
+    if (s.sizeMode === 'follow') size = baseSizePt;
+    else if (s.sizeMode === 'scale') size = baseSizePt * (parseFloat(s.scale) || 100) / 100;
+    else if (s.sizeMode === 'fixed') size = parseFloat(s.size) || 9;
+    if (size) {
+      O.attr(O.ensureChild(rPr, 'w:sz'), 'w:val', String(halfPt(size)));
+      O.attr(O.ensureChild(rPr, 'w:szCs'), 'w:val', String(halfPt(size)));
+    }
+    if (s.font) {
+      var rf = O.ensureChild(rPr, 'w:rFonts');
+      O.attr(rf, 'w:eastAsia', s.font);
+      O.attr(rf, 'w:ascii', s.font);
+      O.attr(rf, 'w:hAnsi', s.font);
+    }
+    if (s.color) O.attr(O.ensureChild(rPr, 'w:color'), 'w:val', hexColor(s.color));
+    if (s.bold) {
+      O.ensureChild(rPr, 'w:b').removeAttributeNS(W, 'val');
+      O.ensureChild(rPr, 'w:bCs').removeAttributeNS(W, 'val');
+    } else if (!s.keepBold) {
+      O.attr(O.ensureChild(rPr, 'w:b'), 'w:val', '0');
+      O.attr(O.ensureChild(rPr, 'w:bCs'), 'w:val', '0');
+    }
+  }
+
+  /* ================== 整改范围（选择性保护 / 防止误改） ================== */
+  function mergeParams(base, patch) {
+    var out = JSON.parse(JSON.stringify(base));
+    (function merge(dst, src) {
+      Object.keys(src || {}).forEach(function (k) {
+        var sv = src[k];
+        if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
+          if (!dst[k] || typeof dst[k] !== 'object') dst[k] = {};
+          merge(dst[k], sv);
+        } else if (sv !== undefined) dst[k] = sv;
+      });
+    })(out, patch || {});
+    return out;
+  }
+
+  function parseNumSpec(spec, max) {
+    var set = new Set();
+    String(spec || '').split(/[,，;；\s]+/).forEach(function (part) {
+      if (!part) return;
+      var m = part.match(/^(\d+)\s*[-~—]\s*(\d+)?$/);
+      if (m) {
+        var a = parseInt(m[1], 10);
+        var b = m[2] ? parseInt(m[2], 10) : max;
+        for (var i = a; i <= b; i++) set.add(i);
+        return;
+      }
+      var n = parseInt(part, 10);
+      if (n > 0) set.add(n);
+    });
+    return set;
+  }
+
+  function isTocLike(p, doc) {
+    var pPr = O.getPPr(p);
+    if (pPr) {
+      var st = O.child(pPr, 'pStyle');
+      var id = st ? O.wval(st) : '';
+      if (id && /^TOC[1-9]$/i.test(id)) return true;
+      var rec = doc && doc.styles && doc.styles[id];
+      if (rec && /^TOC|目录|目錄|contents/i.test(rec.name || '')) return true;
+    }
+    var flds = p.getElementsByTagNameNS(W, 'instrText');
+    for (var i = 0; i < flds.length; i++) if (/TOC\b/i.test(flds[i].textContent)) return true;
+    var simple = p.getElementsByTagNameNS(W, 'fldSimple');
+    for (var j = 0; j < simple.length; j++) {
+      var instr = simple[j].getAttributeNS(W, 'instr') || simple[j].getAttribute('w:instr') || '';
+      if (/TOC\b/i.test(instr)) return true;
+    }
+    var txt = O.paraText(p, false);
+    if (/\.{3,}\s*\d+\s*$/.test(txt)) return true;
+    if (/\t\s*\d+\s*$/.test(txt) && txt.length < 120) return true;
+    return false;
+  }
+
+  var REF_HEAD_RE = /^\s*(参考文献|參考文獻|references|bibliography)\s*$/i;
+  var APPX_HEAD_RE = /^\s*(附录|附錄|appendix|致\s*谢|致\s*謝|acknowledg)/i;
+
+  /**
+   * 生成整改范围计划：哪些段落要被跳过、每个段落属于第几节/第几页。
+   * 「页」按文档中的分页符与 Word 记录的分页位置划分（浏览器无法重新排版）。
+   */
+  function buildRangePlan(xmlDoc, params, doc) {
+    var r = params.range || {};
+    if (r.enabled === false) r = { enabled: false, mode: 'all', sectionRules: {} };
+    var all = xmlDoc.getElementsByTagNameNS(W, 'p');
+    var list = [], idxOf = new Map();
+    for (var i = 0; i < all.length; i++) { list.push(all[i]); idxOf.set(all[i], i); }
+    var n = list.length;
+    var sectionOf = new Array(n), pageOf = new Array(n);
+    var section = 1, page = 1;
+    for (var j = 0; j < n; j++) {
+      sectionOf[j] = section; pageOf[j] = page;
+      var p = list[j];
+      var brs = p.getElementsByTagNameNS(W, 'br');
+      for (var b = 0; b < brs.length; b++) {
+        var ty = O.wval(brs[b]) || brs[b].getAttribute('w:type');
+        if (ty === 'page') page++;
+      }
+      if (p.getElementsByTagNameNS(W, 'lastRenderedPageBreak').length) page++;
+      var pPr = O.getPPr(p);
+      if (pPr && O.child(pPr, 'sectPr')) section++;
+    }
+    var plan = {
+      sections: section, pages: page, sectionOf: sectionOf, pageOf: pageOf,
+      skip: new Set(), reasons: {}, reasonOf: new Map(), list: list, idxOf: idxOf, _tplCache: {}
+    };
+    function mark(p, reason) {
+      plan.skip.add(p);
+      if (!plan.reasonOf.has(p)) plan.reasonOf.set(p, reason);
+      plan.reasons[reason] = (plan.reasons[reason] || 0) + 1;
+    }
+
+    /* 封面页：第一页且内容不多（或含封面类关键词）→ 豁免 */
+    if (r.protectCover && page > 1) {
+      var first = [], txtLen = 0, coverWord = false;
+      for (var k = 0; k < n; k++) {
+        if (pageOf[k] !== 1) continue;
+        first.push(list[k]);
+        var tx = O.paraText(list[k], false);
+        txtLen += tx.trim().length;
+        if (/封面|题目|标题|作者|姓名|学号|专业|指导教师|指导老师|日期|单位|学院|大学|学院/.test(tx)) coverWord = true;
+      }
+      if (first.length <= 25 && (txtLen < 350 || coverWord)) {
+        first.forEach(function (p) { mark(p, 'cover'); });
+      }
+    }
+    /* 目录 */
+    if (r.protectToc) {
+      for (var m2 = 0; m2 < n; m2++) if (isTocLike(list[m2], doc)) mark(list[m2], 'toc');
+    }
+    /* 参考文献 / 附录：从标题到文末 */
+    var cutFrom = -1;
+    for (var q = 0; q < n; q++) {
+      var t = O.paraText(list[q], false).trim();
+      if (!t) continue;
+      if ((r.protectRefs && REF_HEAD_RE.test(t)) || (r.protectAppendix && APPX_HEAD_RE.test(t))) { cutFrom = q; break; }
+    }
+    if (cutFrom >= 0) for (var q2 = cutFrom; q2 < n; q2++) mark(list[q2], 'tail');
+
+    /* 指定页 / 指定分节 */
+    if (r.mode === 'pages') {
+      var pset = parseNumSpec(r.pages, page);
+      for (var a1 = 0; a1 < n; a1++) if (!pset.has(pageOf[a1])) mark(list[a1], 'outOfPages');
+    } else if (r.mode === 'sections') {
+      var sset = parseNumSpec(r.sections, section);
+      for (var a2 = 0; a2 < n; a2++) if (!sset.has(sectionOf[a2])) mark(list[a2], 'outOfSections');
+    }
+    /* 分节规则：整节不整改 */
+    var rules = r.sectionRules || {};
+    Object.keys(rules).forEach(function (key) {
+      var rule = rules[key] || {};
+      var sec = parseInt(key, 10);
+      if (rule.enabled === false) {
+        for (var a3 = 0; a3 < n; a3++) if (sectionOf[a3] === sec) mark(list[a3], 'sectionRule');
+      }
+    });
+    /* 哪些分节被整节排除（用于决定是否还改它的页边距） */
+    plan.sectionsExcluded = new Set();
+    var secCount = {}, secSkipped = {};
+    for (var s1 = 0; s1 < n; s1++) {
+      var sec1 = sectionOf[s1];
+      secCount[sec1] = (secCount[sec1] || 0) + 1;
+      if (plan.skip.has(list[s1])) secSkipped[sec1] = (secSkipped[sec1] || 0) + 1;
+    }
+    Object.keys(secCount).forEach(function (k) {
+      if ((secSkipped[k] || 0) === secCount[k]) plan.sectionsExcluded.add(parseInt(k, 10));
+    });
+
+    /* 分节套用不同模板 */
+    plan.paramsFor = function (index) {
+      var sec = sectionOf[index];
+      var rule = rules[sec];
+      if (rule && rule.templateId) {
+        if (!plan._tplCache[sec]) {
+          var tpls = (global.DFT && global.DFT.TEMPLATES) || [];
+          var tpl = tpls.filter(function (t2) { return t2.id === rule.templateId; })[0];
+          if (!tpl && global.Store && global.Store.loadUserTemplates) {
+            tpl = global.Store.loadUserTemplates().filter(function (t2) { return t2.id === rule.templateId; })[0];
+          }
+          plan._tplCache[sec] = tpl ? mergeParams(params, tpl.params) : params;
+        }
+        return plan._tplCache[sec];
+      }
+      return params;
+    };
+    return plan;
+  }
+
   /* ============================ 主处理流程 ============================ */
   /**
    * 处理一个部件（document.xml / header*.xml / comments.xml ...）
@@ -770,6 +1348,14 @@
     // 页眉页脚/批注：只做字体、标点、空格（不改版式）
     var layout = (partKind === 'document');
 
+    // 0. 整改范围计划（选择性保护：封面 / 目录 / 参考文献 / 指定页 / 指定分节）
+    var plan = buildRangePlan(xmlDoc, params, opts.doc);
+    report.sectionsCount = Math.max(report.sectionsCount || 0, plan.sections);
+    report.pagesCount = Math.max(report.pagesCount || 0, plan.pages);
+    Object.keys(plan.reasons).forEach(function (k) {
+      report.skipReasons[k] = (report.skipReasons[k] || 0) + plan.reasons[k];
+    });
+
     // 1. 段落快照
     var all = xmlDoc.getElementsByTagNameNS(W, 'p');
     var list = [];
@@ -784,14 +1370,24 @@
       list.push(p);
     }
 
-    // 2. 清理空行（含空白页）
-    cleanEmptyParagraphs(list, params, report);
+    // 2. 清理空行（含空白页）—— 保护区域内的空行不动
+    cleanEmptyParagraphs(list, params, report, plan);
 
     // 3. 逐段处理
     var prevHadDrawing = false;
     for (var idx = 0; idx < list.length; idx++) {
       var para = list[idx];
       if (!para.parentNode) continue;
+
+      // 3.0 范围保护：被排除的区域完全不改动（字体、标点、空格、版式全不动）
+      if (plan.skip.has(para)) {
+        report.skippedParas++;
+        prevHadDrawing = O.paraHasDrawing(para);
+        continue;
+      }
+      var pidx = plan.idxOf.get(para);
+      var ep = (pidx === undefined) ? params : plan.paramsFor(pidx);   // 分节可套用不同模板
+
       var text = O.paraText(para, false);
       var trimmed = text.trim();
       if (!trimmed) { prevHadDrawing = O.paraHasDrawing(para); continue; }
@@ -802,18 +1398,20 @@
       var styleLevel = O.headingLevelFromStyle(styleId, opts.styleMap);
 
       // 分类（表格内段落可独立设置字体）
-      var level = (layout && params.headings.enabled) ? detectHeadingLevel(para, trimmed, styleLevel, params) : styleLevel;
+      var level = (layout && ep.headings.enabled) ? detectHeadingLevel(para, trimmed, styleLevel, ep) : styleLevel;
       var tinfo = tableContext(para);
       var ctx;
       var isCaption = false;
-      if (tinfo && params.table && params.table.enabled) {
-        ctx = { kind: 'table', header: tinfo.isHeader };
+      if (tinfo && ep.table && ep.table.enabled) {
+        var hd = ep.table.headerDetect || 'firstRow';
+        var isHdr = hd !== 'none' && (tinfo.isHeader || (hd === 'firstRowCol' && tinfo.isHeaderCol));
+        ctx = { kind: 'table', header: isHdr, headerRow: tinfo.isHeader, headerCol: tinfo.isHeaderCol };
         report.tableParas++;
       } else if (level >= 1) {
-        ctx = { kind: 'heading', level: level, h: params.headings['h' + Math.min(level, 3)] || params.headings.h3 };
+        ctx = { kind: 'heading', level: level, h: ep.headings['h' + Math.min(level, 3)] || ep.headings.h3 };
         report.headings++;
-      } else if (isCaptionText(trimmed, params) ||
-                 (params.caption.enabled && params.caption.afterImage && prevHadDrawing &&
+      } else if (isCaptionText(trimmed, ep) ||
+                 (ep.caption.enabled && ep.caption.afterImage && prevHadDrawing &&
                   trimmed.length <= 150 && !/[。；;]$/.test(trimmed))) {
         isCaption = true;
         ctx = { kind: 'caption' };
@@ -823,26 +1421,50 @@
         report.bodyParas++;
       }
 
-      // 3.1 空格清理
-      cleanSpaces(para, params, report);
-      // 3.2 标点整改
-      fixPunctuation(para, params, report);
-      // 3.3 字体/字号/颜色（中文-数字-西文分离）
-      var applyFont = (ctx.kind === 'heading') ? params.headings.enabled
-                    : (ctx.kind === 'caption') ? params.caption.enabled
-                    : (ctx.kind === 'table') ? params.table.enabled
-                    : params.body.enabled;
-      if (applyFont) processRuns(para, ctx, params, report);
-      // 3.4 题注前后缀
-      if (isCaption) applyCaptionAffix(para, params);
-      // 3.5 段落版式
-      if (layout) applyParagraphProps(para, ctx, params, trimmed);
+      // 3.1 角标智能识别（先识别，后续所有文本处理都跳过它们，保证角标不变形）
+      var scriptMap = collectScriptRuns(para, ep);
+
+      // 3.2 空格清理
+      cleanSpaces(para, ep, report, scriptMap);
+      // 3.3 标点整改
+      fixPunctuation(para, ep, report, scriptMap);
+      // 3.4 字体/字号/颜色（中文-数字-西文分离）
+      var applyFont = (ctx.kind === 'heading') ? ep.headings.enabled
+                    : (ctx.kind === 'caption') ? ep.caption.enabled
+                    : (ctx.kind === 'table') ? ep.table.enabled
+                    : ep.body.enabled;
+      if (applyFont) processRuns(para, ctx, ep, report, scriptMap);
+      else if (scriptMap.size && ep.script.enabled && ep.script.mode !== 'preserve') {
+        // 即使不整改正文字体，角标也要按角标规则统一
+        var bs = contextFonts(ctx, ep).size;
+        scriptMap.forEach(function (type, run) {
+          applyScriptFormat(run, type, bs, ep);
+          report.scripts++;
+        });
+      }
+      // 3.5 题注前后缀
+      if (isCaption) applyCaptionAffix(para, ep);
+      // 3.6 段落版式
+      if (layout) applyParagraphProps(para, ctx, ep, trimmed);
 
       prevHadDrawing = O.paraHasDrawing(para);
     }
 
-    // 4. 页边距（仅正文部件）
-    if (layout) applyPageSetup(xmlDoc, params, report);
+    // 4. 表格专项格式化（边框 / 三线表 / 底色 / 行高 / 适配页宽 / 重复表头 / 数字对齐）
+    if (layout && params.table.enabled) {
+      var tw = textWidthTwips(xmlDoc, params);
+      var tbls = xmlDoc.getElementsByTagNameNS(W, 'tbl');
+      for (var t2 = 0; t2 < tbls.length; t2++) {
+        var tb = tbls[t2];
+        var fp = tb.getElementsByTagNameNS(W, 'p')[0];
+        if (fp && plan.skip.has(fp)) continue;      // 保护区域内的表格保持原样
+        var pidx2 = fp ? plan.idxOf.get(fp) : undefined;
+        applyTableFormat(tb, (pidx2 === undefined) ? params : plan.paramsFor(pidx2), tw, report);
+      }
+    }
+
+    // 5. 页边距（仅正文部件；整节被排除时不动）
+    if (layout) applyPageSetup(xmlDoc, params, report, plan);
   }
 
   /**
@@ -855,7 +1477,9 @@
   async function process(doc, params, onProgress) {
     function tick(p, msg) { if (onProgress) onProgress(p, msg); }
     var report = { headings: 0, captions: 0, bodyParas: 0, tableParas: 0, punctFixed: 0, spacesFixed: 0,
-                   emptyRemoved: 0, runsSplit: 0, sections: 0, parts: [] };
+                   emptyRemoved: 0, runsSplit: 0, sections: 0, parts: [],
+                   scripts: 0, skippedParas: 0, tablesStyled: 0, tablesScaled: 0, cellsAligned: 0,
+                   sectionsCount: 0, pagesCount: 0, skipReasons: {} };
 
     // 每次都从原始 zip 重新解析 main XML —— 保证可反复调整参数而不会叠加
     tick(5, '读取文档结构');
@@ -863,7 +1487,7 @@
     var xmlDoc = O.parseXml(mainText);
 
     tick(20, '清理空行与空格');
-    transformPart(xmlDoc, params, { partKind: 'document', report: report, styleMap: doc.styles });
+    transformPart(xmlDoc, params, { partKind: 'document', report: report, styleMap: doc.styles, doc: doc });
     var mainXml = O.serialize(xmlDoc);
     var replacements = {};
     replacements[doc.mainPath] = mainXml;
@@ -883,7 +1507,7 @@
       try {
         var txt = await doc.zip.file(part.path).async('string');
         var pd = O.parseXml(txt);
-        transformPart(pd, params, { partKind: part.kind, report: report, styleMap: doc.styles });
+        transformPart(pd, params, { partKind: part.kind, report: report, styleMap: doc.styles, doc: doc });
         replacements[part.path] = O.serialize(pd);
         report.parts.push(part.path);
       } catch (e) {
@@ -1165,7 +1789,10 @@
     _internals: {
       detectHeadingLevel: detectHeadingLevel, isCaptionText: isCaptionText,
       isEnglishParagraph: isEnglishParagraph, charClass: charClass,
-      transformChars: transformChars, paraIsEmpty: paraIsEmpty
+      transformChars: transformChars, paraIsEmpty: paraIsEmpty,
+      tableContext: tableContext, collectScriptRuns: collectScriptRuns,
+      buildRangePlan: buildRangePlan, parseNumSpec: parseNumSpec, isTocLike: isTocLike,
+      isNumericCellText: isNumericCellText, textWidthTwips: textWidthTwips
     }
   };
 })(typeof window !== 'undefined' ? window : this);

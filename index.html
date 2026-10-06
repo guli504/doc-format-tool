@@ -155,42 +155,115 @@
         </div>
       </details>
 
-      <!-- 6. 表格文字格式 -->
+      <!-- 6. 表格格式标准化（表格专项） -->
       <details class="sec">
-        <summary>⑥ 表格文字格式
+        <summary>⑥ 表格格式标准化
           <label class="sw"><input type="checkbox" data-param="table.enabled" data-type="bool"><span></span></label>
         </summary>
         <div class="sec-body">
-          <p class="note">开启后，表格内的文字使用下面这套独立格式；<b>关闭时表格文字跟随「④ 文字格式」的正文设置</b>。</p>
-          <label class="field"><span>表格中文字体</span><select class="input" data-param="table.cnFont" data-type="text" data-font-select="cn"></select></label>
-          <label class="field"><span>表格西文字体</span><select class="input" data-param="table.latinFont" data-type="text" data-font-select="en"></select></label>
-          <div class="grid2">
-            <label class="field"><span>表格字号 (磅)</span><input class="input" type="number" step="0.5" min="5" max="72" list="sizeList" data-param="table.size" data-type="number"></label>
-            <label class="field"><span>表格文字颜色</span><input class="input color" type="color" data-param="table.color" data-type="text"></label>
+          <p class="note">开启后表格使用下面这套独立格式；<b>关闭时表格文字跟随「④ 文字格式」</b>。
+            所有操作<b>只改样式，不动表格数据、合并单元格与行列结构</b>。</p>
+
+          <div class="subsec"><div class="sub-title">一键套用表格模板</div>
+            <div class="tpl-grid" id="tblTplGrid"></div>
           </div>
-          <label class="inline"><input type="checkbox" data-param="table.bold" data-type="bool"> 表格文字全部加粗</label>
-          <label class="inline"><input type="checkbox" data-param="table.headerBold" data-type="bool"> 表头行（第一行 / 设置了“重复标题行”的行）加粗</label>
-          <label class="inline"><input type="checkbox" data-param="table.applyParagraph" data-type="bool"> 同时统一表格内的行距与对齐</label>
-          <div class="grid2">
-            <label class="field"><span>表格行距</span>
-              <select class="input" data-param="table.lineMode" data-type="text">
-                <option value="multiple">多倍行距</option>
-                <option value="fixed">固定值(磅)</option>
-                <option value="atLeast">最小值(磅)</option>
+
+          <div class="subsec"><div class="sub-title">表格内文字（不受正文规则影响）</div>
+            <label class="field"><span>表格中文字体</span><select class="input" data-param="table.cnFont" data-type="text" data-font-select="cn"></select></label>
+            <label class="field"><span>表格西文字体</span><select class="input" data-param="table.latinFont" data-type="text" data-font-select="en"></select></label>
+            <div class="grid3">
+              <label class="field"><span>字号(磅)</span><input class="input" type="number" step="0.5" min="5" max="72" list="sizeList" data-param="table.size" data-type="number"></label>
+              <label class="field"><span>颜色</span><input class="input color" type="color" data-param="table.color" data-type="text"></label>
+              <label class="inline mid"><input type="checkbox" data-param="table.bold" data-type="bool"> 全部加粗</label>
+            </div>
+            <label class="field"><span>单元格文字对齐</span>
+              <select class="input" data-param="table.align" data-type="text">
+                <option value="">不改动</option>
+                <option value="center">居中</option>
+                <option value="left">左对齐</option>
+                <option value="right">右对齐</option>
+                <option value="justify">两端对齐</option>
               </select>
             </label>
-            <label class="field"><span>行距值</span><input class="input" type="number" step="0.05" min="0" data-param="table.lineValue" data-type="number"></label>
           </div>
-          <label class="field"><span>表格对齐</span>
-            <select class="input" data-param="table.align" data-type="text">
-              <option value="">不改动</option>
-              <option value="center">居中</option>
-              <option value="left">左对齐</option>
-              <option value="right">右对齐</option>
-              <option value="justify">两端对齐</option>
-            </select>
-          </label>
-          <p class="note">表格里的数字还会额外套用「⑤ 数字格式 → 表格数字」指定的字体与字号。</p>
+
+          <div class="subsec"><div class="sub-title">表头规范化</div>
+            <label class="field"><span>表头识别方式</span>
+              <select class="input" data-param="table.headerDetect" data-type="text">
+                <option value="firstRow">首行是表头</option>
+                <option value="firstRowCol">首行 + 首列都是表头</option>
+                <option value="none">不识别表头</option>
+              </select>
+            </label>
+            <label class="inline"><input type="checkbox" data-param="table.headerBold" data-type="bool"> 表头加粗</label>
+            <label class="inline"><input type="checkbox" data-param="table.repeatHeader" data-type="bool"> 跨页时重复表头行（翻页后仍能看到列名）</label>
+            <label class="field"><span>表头底色</span><input class="input color" type="color" data-param="table.headerFill" data-type="text"></label>
+          </div>
+
+          <div class="subsec"><div class="sub-title">边框 / 线型 / 底色</div>
+            <label class="inline"><input type="checkbox" data-param="table.borderEnabled" data-type="bool"> 统一表格边框线型</label>
+            <div class="grid2">
+              <label class="field"><span>线型</span>
+                <select class="input" data-param="table.borderStyle" data-type="text">
+                  <option value="single">单线（全框线）</option>
+                  <option value="double">双线</option>
+                  <option value="threeLine">三线表（论文常用）</option>
+                  <option value="none">无边框</option>
+                </select>
+              </label>
+              <label class="field"><span>线宽 (1/8 磅)</span><input class="input" type="number" min="2" max="48" data-param="table.borderSize" data-type="number"></label>
+            </div>
+            <div class="grid2">
+              <label class="field"><span>边框颜色</span><input class="input color" type="color" data-param="table.borderColor" data-type="text"></label>
+              <label class="field"><span>表格主体底色</span><input class="input color" type="color" data-param="table.bodyFill" data-type="text"></label>
+            </div>
+          </div>
+
+          <div class="subsec"><div class="sub-title">行高 / 列宽 / 整体</div>
+            <label class="inline"><input type="checkbox" data-param="table.rowHeightEnabled" data-type="bool"> 统一行高</label>
+            <div class="grid2">
+              <label class="field"><span>行高 (厘米)</span><input class="input" type="number" step="0.05" min="0" data-param="table.rowHeight" data-type="number"></label>
+              <label class="field"><span>行高方式</span>
+                <select class="input" data-param="table.rowHeightRule" data-type="text">
+                  <option value="atLeast">最小值</option>
+                  <option value="exact">固定值</option>
+                  <option value="auto">自动</option>
+                </select>
+              </label>
+            </div>
+            <label class="field"><span>表格整体对齐</span>
+              <select class="input" data-param="table.tableAlign" data-type="text">
+                <option value="">不改动</option>
+                <option value="center">居中</option>
+                <option value="left">左对齐</option>
+                <option value="right">右对齐</option>
+              </select>
+            </label>
+            <label class="inline"><input type="checkbox" data-param="table.fitPage" data-type="bool"> 超出页宽自动缩放适配页宽（防止表格被截断）</label>
+          </div>
+
+          <div class="subsec"><div class="sub-title">表格数字对齐与行距</div>
+            <label class="field"><span>数字对齐方式</span>
+              <select class="input" data-param="table.numberAlign" data-type="text">
+                <option value="none">不改动</option>
+                <option value="center">居中</option>
+                <option value="right">右对齐</option>
+                <option value="decimal">小数点对齐（十进制制表位）</option>
+              </select>
+            </label>
+            <label class="inline"><input type="checkbox" data-param="table.applyParagraph" data-type="bool"> 同时统一表格内行距与对齐</label>
+            <div class="grid2">
+              <label class="field"><span>表格行距</span>
+                <select class="input" data-param="table.lineMode" data-type="text">
+                  <option value="multiple">多倍行距</option>
+                  <option value="fixed">固定值(磅)</option>
+                  <option value="atLeast">最小值(磅)</option>
+                </select>
+              </label>
+              <label class="field"><span>行距值</span><input class="input" type="number" step="0.05" min="0" data-param="table.lineValue" data-type="number"></label>
+            </div>
+            <p class="note">表格里的数字还会额外套用「⑤ 数字格式 → 表格数字」指定的字体与字号。</p>
+          </div>
         </div>
       </details>
 
@@ -329,9 +402,83 @@
         </div>
       </details>
 
-      <!-- 13. 处理范围 -->
+      <!-- 13. 角标（上标 / 下标） -->
       <details class="sec">
-        <summary>⑬ 处理范围</summary>
+        <summary>⑬ 角标（上标 / 下标）
+          <label class="sw"><input type="checkbox" data-param="script.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <p class="note">智能识别全文角标（H<sub>2</sub>O、x<sup>2</sup>、cm<sup>3</sup>、[1]、脚注编号等），
+            角标使用独立字号，<b>不会被正文字号改大变形</b>；内容与上下标状态默认完全保留。</p>
+          <label class="inline"><input type="checkbox" data-param="script.detectMarked" data-type="bool"> 识别带标记的真角标（准确率 100%）</label>
+          <label class="inline"><input type="checkbox" data-param="script.detectSmall" data-type="bool"> 智能识别"小字号未标记"的假角标并修正为上标</label>
+          <label class="field"><span>处理方式</span>
+            <select class="input" data-param="script.mode" data-type="text">
+              <option value="normalize">统一角标字号与基线（推荐）</option>
+              <option value="preserve">完全保留角标原样（只做保护，不改任何角标格式）</option>
+            </select>
+          </label>
+          <label class="field"><span>角标字号</span>
+            <select class="input" data-param="script.sizeMode" data-type="text">
+              <option value="follow">跟随所在段落正文（推荐，视觉比例由 Word 统一）</option>
+              <option value="scale">按正文的百分比</option>
+              <option value="fixed">固定磅值</option>
+            </select>
+          </label>
+          <div class="grid3">
+            <label class="field"><span>比例 (%)</span><input class="input" type="number" min="30" max="200" data-param="script.scale" data-type="number"></label>
+            <label class="field"><span>固定磅值</span><input class="input" type="number" step="0.5" min="4" max="36" data-param="script.size" data-type="number"></label>
+            <label class="field"><span>角标颜色</span><input class="input color" type="color" data-param="script.color" data-type="text"></label>
+          </div>
+          <label class="field"><span>角标字体（留空=保留原字体）</span><select class="input" data-param="script.font" data-type="text" data-font-select="any"></select></label>
+          <label class="inline"><input type="checkbox" data-param="script.keepBold" data-type="bool"> 保留原角标加粗状态</label>
+          <label class="inline"><input type="checkbox" data-param="script.bold" data-type="bool"> 角标统一加粗</label>
+          <label class="field"><span>手动修正：需要设为上标的内容</span>
+            <input class="input" placeholder="多个用分号分隔，例如：[2];①②;/^\\d+$/ 支持正则" data-param="script.manual" data-type="text">
+          </label>
+          <p class="note">识别错误的（把普通文字当角标）可以用上面的"处理方式 → 完全保留角标原样"关闭自动修正；
+            识别不到的（真角标被当成正文）可以填进"手动修正"里强制设为上标。</p>
+        </div>
+      </details>
+
+      <!-- 14. 整改范围（选择性保护） -->
+      <details class="sec">
+        <summary>⑭ 整改范围（选择性保护）
+          <label class="sw"><input type="checkbox" data-param="range.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <p class="note">防止误改：封面、目录、参考文献等不需要动的地方可以整块跳过。<b>被排除的区域连标点、空格、页边距都不会改</b>。</p>
+          <label class="field"><span>整改范围</span>
+            <select class="input" data-param="range.mode" data-type="text">
+              <option value="all">全文整改</option>
+              <option value="pages">只整改指定页</option>
+              <option value="sections">只整改指定分节</option>
+            </select>
+          </label>
+          <div class="grid2">
+            <label class="field"><span>页码范围（如 2-10,12,15-）</span>
+              <input class="input" placeholder="2-10,12" data-param="range.pages" data-type="text">
+            </label>
+            <label class="field"><span>分节范围（如 2-4）</span>
+              <input class="input" placeholder="2-4" data-param="range.sections" data-type="text">
+            </label>
+          </div>
+          <label class="inline"><input type="checkbox" data-param="range.protectCover" data-type="bool"> 智能豁免封面页（首页）</label>
+          <label class="inline"><input type="checkbox" data-param="range.protectToc" data-type="bool"> 智能豁免目录（含页码引导线 / 目录域）</label>
+          <label class="inline"><input type="checkbox" data-param="range.protectRefs" data-type="bool"> 豁免参考文献（从"参考文献"标题到文末）</label>
+          <label class="inline"><input type="checkbox" data-param="range.protectAppendix" data-type="bool"> 豁免附录 / 致谢（从标题到文末）</label>
+          <label class="inline"><input type="checkbox" data-param="range.highlight" data-type="bool"> 在原文档预览中高亮"不会被整改"的区域</label>
+          <div class="subsec"><div class="sub-title">分节差异化（发现 <b id="secCount">-</b> 个分节）</div>
+            <p class="note">可让某个分节完全不整改，或单独套用另一套模板（例如正文用宋体、附录用仿宋）。</p>
+            <div id="sectionRules"></div>
+            <button class="btn btn-mini" id="btnScanSections" disabled>重新扫描分节</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- 15. 处理范围 -->
+      <details class="sec">
+        <summary>⑮ 处理范围</summary>
         <div class="sec-body">
           <label class="inline"><input type="checkbox" data-param="scope.tables" data-type="bool"> 表格内文字</label>
           <label class="inline"><input type="checkbox" data-param="scope.textboxes" data-type="bool"> 文本框内文字</label>
@@ -344,7 +491,7 @@
 
       <!-- 14. 字体库 -->
       <details class="sec">
-        <summary>⑭ 字体自定义库 <span class="sec-tag" id="tagFontCount">0</span></summary>
+        <summary>⑯ 字体自定义库 <span class="sec-tag" id="tagFontCount">0</span></summary>
         <div class="sec-body">
           <div class="row">
             <input class="input" id="fontName" placeholder="新增字体名称（如：方正小标宋简体）">
@@ -401,7 +548,9 @@
 
     <div class="preview-body" id="previewBody">
       <div class="pane" id="paneOriginal">
-        <div class="pane-label">原文档预览</div>
+        <div class="pane-label">原文档预览
+          <span class="skip-legend" id="skipLegend" hidden><i></i>黄色斜纹区域本次不会被整改</span>
+        </div>
         <div class="page-host" id="hostOriginal"><div class="empty-state">导入文档后在此显示原文档</div></div>
       </div>
       <div class="pane" id="paneFixed">
@@ -435,9 +584,11 @@
       <h3>1. 导入文档</h3>
       <p>把 .docx / .doc / .rtf 文件拖到左侧“文档导入”区域，或点击“点击选择文件”。支持一次选择多个文件批量处理。所有解析都在本机浏览器完成，文件不会上传。</p>
       <h3>2. 选择模板或自定义参数</h3>
-      <p>左侧 ①～⑭ 是全部设置项：页面边距、文字格式、数字格式、表格文字格式、标题层级、段落排版、标点、空格空行、图片/表格题注、公式保护、处理范围。点击②中的内置模板（公文标准 / 大学论文 / 实习报告 / 日常办公 / 期刊投稿）可一键套用，再按需微调；也可把自己的参数保存为专属模板。</p>
-      <h3>3. 表格文字也能单独设置</h3>
-      <p>「⑥ 表格文字格式」打开后，表格里的文字可以使用与正文不同的字体、字号、颜色，还能让表头行自动加粗；表格里的数字见「⑤ 数字格式 → 表格数字」。不开启时，表格文字跟随正文设置。</p>
+      <p>左侧 ①～⑯ 是全部设置项：页面边距、文字格式、数字格式、表格格式标准化、标题层级、段落排版、标点、空格空行、图片/表格题注、公式保护、角标、整改范围、处理范围、字体库。点击②中的内置模板（公文标准 / 大学论文 / 实习报告 / 日常办公 / 期刊投稿）可一键套用；表格还可以在「⑥」里单独套用 3 套表格模板。</p>
+      <h3>3. 表格、角标、范围三个专项</h3>
+      <p><b>表格</b>：「⑥ 表格格式标准化」可一键统一边框线型（单线 / 双线 / 三线表）、表头加粗与底色、行高、跨页重复表头、数字小数点对齐、超出页宽自动缩放；表格文字与正文互不干扰，且只改样式不动数据与合并单元格。<br>
+      <b>角标</b>：「⑬ 角标」自动识别上标下标（H₂O、x²、cm³、[1] 等），角标用独立字号，不会被正文改大变形；识别不到的可以填进“手动修正”强制设为上标。<br>
+      <b>范围</b>：「⑭ 整改范围」默认自动豁免封面页与目录页，也可以只整改指定页 / 指定分节、豁免参考文献与附录。被排除的区域<b>连标点、空格、页边距都不会改</b>；原文档预览里会用黄色斜纹高亮显示这些区域。</p>
       <h3>4. 一键整改并预览</h3>
       <p>点击右上“⚡ 一键整改”，右侧会同时显示“原文档”和“整改后”两页，可切换“原文档 / 分屏对比 / 整改后”三种视图，用缩放调节显示比例。</p>
       <h3>4. 格式检测与一键修复</h3>

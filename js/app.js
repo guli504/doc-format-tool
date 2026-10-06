@@ -93,6 +93,10 @@
       } else val = el.value;
       setPath(p, path, val);
     });
+    // 非表单状态（分节规则等）从当前参数中保留，避免被覆盖
+    if (state.params && state.params.range && state.params.range.sectionRules) {
+      p.range.sectionRules = state.params.range.sectionRules;
+    }
     return p;
   }
 
@@ -272,6 +276,7 @@
     renderFileUI();
     updateButtons();
     if (state.files.length) {
+      refreshSectionRules();
       renderOriginalPreview();
       toast('已导入 ' + state.files.length + ' 个文件，点击“一键整改”开始', 'ok');
     }
@@ -308,6 +313,56 @@
     $('#btnExportPdf').disabled = !done;
   }
 
+  /* ========================= 表格模板 / 分节规则 / 范围高亮 ========================= */
+  function renderTableTemplates() {
+    var host = document.getElementById('tblTplGrid');
+    if (!host) return;
+    host.innerHTML = DFT.TABLE_TEMPLATES.map(function (t) {
+      return '<button class="tpl" data-tbltpl="' + t.id + '"><b>' + t.name + '</b><small>' + t.desc + '</small></button>';
+    }).join('');
+  }
+
+  /** 扫描文档分节，生成"分节差异化整改"的规则表 */
+  function refreshSectionRules() {
+    var host = document.getElementById('sectionRules');
+    if (!host) return;
+    var f = activeFile();
+    var btn = document.getElementById('btnScanSections');
+    if (btn) btn.disabled = !f;
+    if (!f) {
+      document.getElementById('secCount').textContent = '-';
+      host.innerHTML = '<span class="note">导入文档后可扫描分节。</span>';
+      return;
+    }
+    var plan = Engine._internals.buildRangePlan(f.doc.xml, state.params, f.doc);
+    document.getElementById('secCount').textContent = plan.sections;
+    var rules = (state.params.range && state.params.range.sectionRules) || {};
+    var html = '';
+    for (var i = 1; i <= plan.sections; i++) {
+      var cur = rules[i] || {};
+      var val = (cur.enabled === false) ? '__off' : (cur.templateId || '');
+      html += '<div class="row"><span class="sec-tag" style="min-width:58px">第 ' + i + ' 节</span>' +
+        '<select class="input" data-secrule="' + i + '">' +
+        '<option value="">跟随全局参数</option>' +
+        '<option value="__off"' + (val === '__off' ? ' selected' : '') + '>整节不整改</option>' +
+        DFT.TEMPLATES.map(function (t) {
+          return '<option value="' + t.id + '"' + (val === t.id ? ' selected' : '') + '>套用：' + t.name + '</option>';
+        }).join('') +
+        '</select></div>';
+    }
+    host.innerHTML = html || '<span class="note">未检测到分节信息。</span>';
+  }
+
+  /** 计算"不会被整改"的段落集合，供预览高亮 */
+  function rangeHighlight(f) {
+    if (!f || !state.params.range || state.params.range.highlight === false) return null;
+    try {
+      var plan = Engine._internals.buildRangePlan(f.doc.xml, state.params, f.doc);
+      if (!plan.skip.size) return null;
+      return { set: plan.skip, reason: function (p) { return plan.reasonOf.get(p) || ''; }, count: plan.skip.size };
+    } catch (e) { return null; }
+  }
+
   /* ============================== 预览渲染 ============================== */
   function pageStyleCss(page, zoom) {
     return 'width:' + page.w + 'cm;min-height:' + page.h + 'cm;' +
@@ -322,7 +377,17 @@
     try {
       var styleMap = Render.buildStyleMap(f.doc.stylesRaw);
       f.doc.styleMap = styleMap;
-      var res = Render.render(f.doc, f.doc.xml, { styleMap: styleMap });
+      var hl = rangeHighlight(f);
+      var legend = $('#skipLegend');
+      if (legend) {
+        legend.hidden = !hl;
+        if (hl) legend.innerHTML = '<i></i>黄色斜纹区域（' + hl.count + ' 段）本次不会被整改';
+      }
+      var res = Render.render(f.doc, f.doc.xml, {
+        styleMap: styleMap,
+        skipSet: hl ? hl.set : null,
+        skipReason: hl ? hl.reason : null
+      });
       host.innerHTML = '<div class="page" style="' + pageStyleCss(res.page, state.zoom) + '">' + res.html + '</div>';
     } catch (e) {
       console.error(e);
@@ -344,7 +409,10 @@
       var r = f.report || {};
       $('#fixedHint').textContent = '标题 ' + (r.headings || 0) + ' · 题注 ' + (r.captions || 0) +
         ' · 标点 ' + (r.punctFixed || 0) + ' · 空格 ' + (r.spacesFixed || 0) +
-        ' · 删空行 ' + (r.emptyRemoved || 0) + ' · 拆分数字 ' + (r.runsSplit || 0);
+        ' · 删空行 ' + (r.emptyRemoved || 0) + ' · 拆分数字 ' + (r.runsSplit || 0) +
+        (r.scripts ? ' · 角标 ' + r.scripts : '') +
+        (r.tableParas ? ' · 表格段 ' + r.tableParas : '') +
+        (r.skippedParas ? ' · 保护跳过 ' + r.skippedParas : '');
     } catch (e) {
       console.error(e);
       host.innerHTML = '<div class="empty-state">预览失败：' + Render.escapeHtml(e.message) + '</div>';
@@ -624,8 +692,46 @@
       var t = DFT.TEMPLATES.filter(function (x) { return x.id === b.dataset.tpl; })[0];
       if (t) applyTemplate(t.params, t.name);
     });
-    $('#btnSaveTpl').addEventListener('click', function () {
-      var name = $('#tplName').value.trim();
+    /* 表格模板（只覆盖表格相关参数） */
+    var tblGrid = document.getElementById('tblTplGrid');
+    if (tblGrid) {
+      tblGrid.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-tbltpl]');
+        if (!b) return;
+        var t = DFT.TABLE_TEMPLATES.filter(function (x) { return x.id === b.dataset.tbltpl; })[0];
+        if (t) applyTemplate(t.params, '表格模板 · ' + t.name);
+      });
+    }
+
+    /* 分节差异化整改 */
+    var secRules = document.getElementById('sectionRules');
+    if (secRules) {
+      secRules.addEventListener('change', function (e) {
+        var sel = e.target.closest('[data-secrule]');
+        if (!sel) return;
+        var sec = sel.dataset.secrule;
+        var rules = (state.params.range && state.params.range.sectionRules) || {};
+        if (sel.value === '__off') rules[sec] = { enabled: false };
+        else if (sel.value) rules[sec] = { templateId: sel.value };
+        else delete rules[sec];
+        if (!state.params.range) state.params.range = Store.clone(DFT.DEFAULT_PARAMS.range);
+        state.params.range.sectionRules = rules;
+        Store.saveParams(state.params);
+        pushHistory(state.params);
+        toast('第 ' + sec + ' 节：' + (sel.value === '__off' ? '整节不整改' :
+          (sel.value ? '套用模板 ' + sel.options[sel.selectedIndex].text : '跟随全局参数')), 'ok');
+        runProcess(true);
+      });
+    }
+    var scanBtn = document.getElementById('btnScanSections');
+    if (scanBtn) {
+      scanBtn.addEventListener('click', function () {
+        refreshSectionRules();
+        toast('已重新扫描文档分节', 'ok');
+      });
+    }
+
+    $('#btnSaveTpl').addEventListener('click', function () {      var name = $('#tplName').value.trim();
       if (!name) return toast('请先输入模板名称', 'err');
       Store.upsertUserTemplate(name, '自定义模板', state.params);
       $('#tplName').value = '';
@@ -801,6 +907,7 @@
   function boot() {
     initHeadingBoxes();
     renderTemplates();
+    renderTableTemplates();
     renderFontLibrary();
     var ui = Store.loadUI();
     state.view = ui.view || 'split';
@@ -817,6 +924,7 @@
     initButtons();
     setView(state.view);
     document.body.dataset.view = state.view;
+    refreshSectionRules();
     updateButtons();
     renderFileUI();
     console.log('%c文档格式批量整改工具 v' + DFT.VERSION + ' 已就绪（纯本地运行）', 'color:#2f6fed;font-weight:bold');

@@ -294,6 +294,13 @@ body[data-view="fixed"] #paneOriginal { display: none; }
 .dft-tab { display: inline-block; width: 2em; }
 .dft-pbreak { display: block; border-top: 1px dashed #c9d2e0; margin: 8px 0; }
 .dft-math { font-family: "Cambria Math", "Times New Roman", serif; font-style: italic; background: #fff7e6; padding: 0 2px; border-radius: 3px; }
+/* 整改范围保护：不会被整改的段落 */
+.dft-skip {
+  background: repeating-linear-gradient(135deg, #fff8e1, #fff8e1 6px, #fffdf5 6px, #fffdf5 12px);
+  box-shadow: inset 3px 0 0 #f0b429;
+}
+.skip-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #a06400; }
+.skip-legend i { display: inline-block; width: 12px; height: 10px; background: #ffecb3; border-left: 3px solid #f0b429; }
 .dft-comment { color: #e08a1e; font-size: .8em; vertical-align: super; }
 .empty-state { color: var(--text-3); text-align: center; margin-top: 48px; font-size: 12.5px; line-height: 1.8; }
 .empty-state.small { margin-top: 14px; }
