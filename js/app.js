@@ -562,6 +562,69 @@
     if (hint) hint.textContent = state.markMode ? ('点选中：已标记 ' + m + ' 段') : '';
   }
 
+  /* ============================== 规范知识库 ============================== */
+  function renderKnowledge(kw) {
+    var K = DFT.KNOWLEDGE, host = $('#kbBody');
+    if (!K || !host) return;
+    var q = String(kw || '').trim().toLowerCase();
+    var totalItems = 0, shown = 0;
+    var html = K.categories.map(function (c) {
+      var items = c.items.filter(function (it) {
+        totalItems++;
+        if (!q) return true;
+        var hay = (it.text + ' ' + c.name + ' ' + (it.ok || []).join(' ') + ' ' + (it.bad || []).join(' '))
+          .replace(/<[^>]+>/g, ' ').toLowerCase();
+        if (hay.indexOf(q) >= 0) return true;
+        // 允许用"错误写法"里的词反查，例如搜 ul / KD
+        return (it.bad || []).some(function (b) { return b.toLowerCase().indexOf(q) >= 0; });
+      });
+      if (!items.length) return '';
+      shown += items.length;
+      return '<section class="kb-cat"><h4>' + c.name + '</h4>' +
+        '<p class="kb-desc">' + c.desc + '</p>' +
+        items.map(function (it) {
+          return '<div class="kb-item lv-' + (it.level || 'low') + '">' +
+            '<div class="kb-text">' + it.text + '</div>' +
+            ((it.ok || []).length ? '<div class="kb-eg ok"><b>正确</b>' +
+              it.ok.map(function (x) { return '<code>' + x + '</code>'; }).join('') + '</div>' : '') +
+            ((it.bad || []).length ? '<div class="kb-eg bad"><b>错误</b>' +
+              it.bad.map(function (x) { return '<code>' + x + '</code>'; }).join('') + '</div>' : '') +
+            (it.params ? '<button class="btn btn-mini" data-kb-apply="' +
+              encodeURIComponent(JSON.stringify(it.params)) + '">按此规范设置</button>' : '') +
+            '</div>';
+        }).join('') + '</section>';
+    }).join('');
+    host.innerHTML = html || '<div class="kb-empty">没有匹配的规范条目，换个关键词试试（如 空格 / 单位 / 温度 / 引用）</div>';
+    var st = K.stats();
+    $('#kbStat').textContent = q
+      ? ('匹配 ' + shown + ' / ' + st.items + ' 条')
+      : (st.categories + ' 大类 · ' + st.items + ' 条规范 · ' + st.units + ' 个单位 · ' + st.wrongForms + ' 种错误写法');
+  }
+
+  function openKb() {
+    var m = $('#kbModal');
+    if (!m) return;
+    renderKnowledge($('#kbSearch') ? $('#kbSearch').value : '');
+    m.hidden = false;
+  }
+
+  /** 把知识库里某条规范推荐的参数写进设置 */
+  function applyKbParams(json) {
+    var obj;
+    try { obj = JSON.parse(decodeURIComponent(json)); } catch (e) { return 0; }
+    var n = 0;
+    Object.keys(obj).forEach(function (path) {
+      setPath(state.params, path, obj[path]);
+      n++;
+    });
+    applyParams(state.params);
+    Store.saveParams(state.params);
+    pushHistory(state.params);
+    updateSizeNames();
+    runProcess(true);
+    return n;
+  }
+
   /* ============================== 预览渲染 ============================== */
   function pageStyleCss(page, zoom) {
     return 'width:' + page.w + 'cm;min-height:' + page.h + 'cm;' +
@@ -1130,7 +1193,51 @@
     $('#btnToggleIssues').addEventListener('click', function () {
       $('#issuesPanel').classList.toggle('collapsed');
     });
-    $('#issuesHead').addEventListener('click', function (e) {
+
+    /* 规范知识库 */
+    var openers = [$('#btnKb'), $('#btnKbOpen')];
+    openers.forEach(function (b) { if (b) b.addEventListener('click', openKb); });
+    var closeKb = $('#btnCloseKb');
+    if (closeKb) closeKb.addEventListener('click', function () { $('#kbModal').hidden = true; });
+    var kbModal = $('#kbModal');
+    if (kbModal) {
+      kbModal.addEventListener('click', function (e) {
+        if (e.target === kbModal) kbModal.hidden = true;    // 点遮罩关闭
+      });
+    }
+    var kbSearch = $('#kbSearch');
+    if (kbSearch) {
+      var kbTimer = null;
+      kbSearch.addEventListener('input', function () {
+        clearTimeout(kbTimer);
+        var v = this.value;
+        kbTimer = setTimeout(function () { renderKnowledge(v); }, 120);
+      });
+    }
+    var kbBody = $('#kbBody');
+    if (kbBody) {
+      kbBody.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-kb-apply]');
+        if (!b) return;
+        var n = applyKbParams(b.dataset.kbApply);
+        toast('已按该规范设置 ' + n + ' 项参数', 'ok');
+      });
+    }
+    var kbEnable = $('#btnKbEnable');
+    if (kbEnable) {
+      kbEnable.addEventListener('click', function () {
+        setPath(state.params, 'unit.enabled', true);
+        ['fixSpelling', 'spaceNumber', 'tightPercent', 'mathSpace', 'timesSign',
+         'slashTight', 'halfWidth', 'abbrSpace'].forEach(function (k) {
+          setPath(state.params, 'unit.' + k, true);
+        });
+        applyParams(state.params);
+        Store.saveParams(state.params);
+        pushHistory(state.params);
+        runProcess(state.files.length > 0);
+        toast('已启用「数字与单位规范」，导入文档后点一键整改即可', 'ok', 3200);
+      });
+    }    $('#issuesHead').addEventListener('click', function (e) {
       if (e.target.closest('button')) return;
       $('#issuesPanel').classList.toggle('collapsed');
     });

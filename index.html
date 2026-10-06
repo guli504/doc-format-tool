@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文档格式批量整改工具 · 纯本地 · 不上传</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6fed'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23fff' font-family='Microsoft YaHei,sans-serif'%3E%E6%96%87%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=110">
+<link rel="stylesheet" href="css/app.css?v=120">
 </head>
 <body>
 
@@ -19,7 +19,7 @@
     </div>
   </div>
   <div class="top-actions">
-    <span class="badge badge-version" id="verBadge" title="如果这里显示的不是最新版本号，说明浏览器用的是缓存的旧代码，请按 Ctrl+F5 强制刷新">v1.1.0</span>
+    <span class="badge badge-version" id="verBadge" title="如果这里显示的不是最新版本号，说明浏览器用的是缓存的旧代码，请按 Ctrl+F5 强制刷新">v1.2.0</span>
     <span class="badge badge-privacy" title="所有文件仅在本机浏览器中处理，绝不联网上传">🔒 纯本地处理 · 文件不上传</span>
     <button class="btn btn-ghost" id="btnHelp">使用说明</button>
     <button class="btn btn-ghost" id="btnExportCfg" title="把当前参数、模板、字体库导出为 JSON 备份">导出配置</button>
@@ -46,6 +46,7 @@
         <button class="cat-chip active" data-cat="all">全部</button>
         <button class="cat-chip" data-cat="font">文字</button>
         <button class="cat-chip" data-cat="digit">数字</button>
+        <button class="cat-chip" data-cat="unit">单位</button>
         <button class="cat-chip" data-cat="para">段落</button>
         <button class="cat-chip" data-cat="punct">标点</button>
         <button class="cat-chip" data-cat="caption">图片注释</button>
@@ -528,6 +529,36 @@
         </div>
       </details>
 
+      <!-- 17. 数字与单位规范（知识库驱动） -->
+      <details class="sec" data-cat="unit">
+        <summary>⑰ 数字与单位规范 <span class="sec-tag">知识库驱动</span>
+          <label class="sw" title="启用数字与单位规范化"><input type="checkbox" data-param="unit.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <div class="note">依据《实验论文数字 &amp; 单位格式规范》校订版（内置 119 个单位、164 种常见错误写法）：
+            <button class="link-btn" id="btnKbOpen">查看规范知识库</button>。默认关闭，理工科论文 / 申报书建议开启。</div>
+          <label class="inline"><input type="checkbox" data-param="unit.fixSpelling" data-type="bool"> 单位拼写与大小写：ul→μL、KD→kDa、ml→mL、sec→s</label>
+          <label class="inline"><input type="checkbox" data-param="unit.spaceNumber" data-type="bool"> 数字与单位之间加空格：10μL → 10 μL</label>
+          <label class="inline"><input type="checkbox" data-param="unit.tightPercent" data-type="bool"> % ‰ ° ′ ″ 与数字紧贴：95 % → 95%</label>
+          <label class="inline"><input type="checkbox" data-param="unit.mathSpace" data-type="bool"> 数学符号前后加空格：P&lt;0.05 → P &lt; 0.05</label>
+          <label class="inline"><input type="checkbox" data-param="unit.timesSign" data-type="bool"> 乘号规范化：3 x 10 → 3 × 10</label>
+          <label class="inline"><input type="checkbox" data-param="unit.slashTight" data-type="bool"> 斜杠两侧不留空格：5 ng / μL → 5 ng/μL</label>
+          <label class="inline"><input type="checkbox" data-param="unit.halfWidth" data-type="bool"> 全角数字 / 字母 / 空格 → 半角</label>
+          <label class="inline"><input type="checkbox" data-param="unit.abbrSpace" data-type="bool"> 缩写与数字之间加空格：pH7.4 → pH 7.4</label>
+          <label class="inline"><input type="checkbox" data-param="unit.superDigit" data-type="bool"> 幂次转上标：10^10 → 10¹⁰（改动较大）</label>
+          <div class="grid2">
+            <label class="field"><span>温度写法统一</span>
+              <select class="input" data-param="unit.celsius" data-type="text">
+                <option value="degree">°C（推荐，兼容性好）</option>
+                <option value="char">℃（单字符）</option>
+                <option value="keep">保持原样</option>
+              </select>
+            </label>
+            <label class="inline mid"><input type="checkbox" data-param="unit.celsiusSpace" data-type="bool"> °C 前加空格（37 °C）</label>
+          </div>
+        </div>
+      </details>
+
       <!-- 14. 字体库 -->
       <details class="sec" data-cat="font">
         <summary>⑯ 字体自定义库 <span class="sec-tag" id="tagFontCount">0</span></summary>
@@ -562,6 +593,7 @@
       <button class="btn btn-primary" id="btnUpload">＋ 导入文档</button>
       <button class="btn btn-go" id="btnRun" disabled>⚡ 一键整改</button>
       <button class="btn" id="btnDetect" disabled>🔍 格式检测</button>
+      <button class="btn" id="btnKb" title="查看内置的《实验论文数字 &amp; 单位格式规范》知识库">📚 规范库</button>
       <span class="tb-sep"></span>
       <button class="btn" id="btnAutoFix" disabled>🛠 一键修复全部问题</button>
       <span class="tb-sep"></span>
@@ -623,6 +655,25 @@
 <div class="drawer-mask" id="drawerMask"></div>
 
 <!-- ============================ 使用说明弹层 ============================ -->
+
+<!-- ============================ 规范知识库 ============================ -->
+<div class="modal" id="kbModal" hidden>
+  <div class="modal-card kb-card">
+    <div class="modal-head">
+      <strong>📚 规范知识库 · 实验论文数字 &amp; 单位格式规范</strong>
+      <span class="kb-stat" id="kbStat"></span>
+      <button class="btn btn-mini" id="btnCloseKb">关闭</button>
+    </div>
+    <div class="modal-body">
+      <div class="kb-tools">
+        <input class="input" id="kbSearch" placeholder="搜索规范条目：空格 / μL / kDa / 温度 / 上标 / 引用 …">
+        <button class="btn btn-mini" id="btnKbEnable">一键启用数字与单位规范</button>
+      </div>
+      <div id="kbBody"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="helpModal" hidden>
   <div class="modal-card">
     <div class="modal-head">
@@ -668,13 +719,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/vendor/jszip.min.js?v=110"></script>
-<script src="js/constants.js?v=110"></script>
-<script src="js/store.js?v=110"></script>
-<script src="js/ooxml.js?v=110"></script>
-<script src="js/engine.js?v=110"></script>
-<script src="js/render.js?v=110"></script>
-<script src="js/legacy-doc.js?v=110"></script>
-<script src="js/app.js?v=110"></script>
+<script src="js/vendor/jszip.min.js?v=120"></script>
+<script src="js/constants.js?v=120"></script>
+<script src="js/knowledge.js?v=120"></script>
+<script src="js/store.js?v=120"></script>
+<script src="js/ooxml.js?v=120"></script>
+<script src="js/engine.js?v=120"></script>
+<script src="js/render.js?v=120"></script>
+<script src="js/legacy-doc.js?v=120"></script>
+<script src="js/app.js?v=120"></script>
 </body>
 </html>

@@ -1396,6 +1396,251 @@
    * @param {Object} params
    * @param {Object} opts { partKind, report }
    */
+  /* ==================================================================
+   * 数字与单位规范（知识库驱动）
+   * 词典与条目来自 js/knowledge.js（《实验论文数字&单位格式规范》校订版）
+   * ================================================================== */
+  var _unitDB = null;
+  function unitDB() {
+    if (_unitDB) return _unitDB;
+    var list = (global.DFT && global.DFT.KNOWLEDGE && global.DFT.KNOWLEDGE.units) || [];
+    var db = {
+      map: Object.create(null),      // 错误写法 → 规范写法
+      known: Object.create(null),    // 规范写法集合
+      noSpace: Object.create(null),  // 与数字紧贴的符号
+      words: []                      // 不带数字上下文的缩写替换（按长度倒序）
+    };
+    list.forEach(function (u) {
+      if (!u || !u.canon) return;
+      db.known[u.canon] = 1;
+      if (u.noSpace) db.noSpace[u.canon] = 1;
+      (u.alts || []).forEach(function (a) {
+        if (a && !(a in db.map)) db.map[a] = u.canon;
+      });
+    });
+    Object.keys(db.map).forEach(function (k) {
+      if (!/^[A-Za-z][A-Za-z0-9]*$/.test(k)) return;      // 带 / · 的交给数字上下文规则
+      var hasUpper = /[A-Z]/.test(k);
+      if (k.length < 2) return;
+      if (k.length < 3 && !hasUpper) return;              // 两个小写字母太容易误伤
+      db.words.push({ k: k, v: db.map[k] });
+    });
+    db.words.sort(function (a, b) { return b.k.length - a.k.length; });
+    _unitDB = db;
+    return db;
+  }
+
+  function canonUnit(tok, db) {
+    if (!tok) return null;
+    if (db.known[tok]) return tok;
+    if (db.map[tok]) return db.map[tok];
+    return null;      // 不做大小写兜底，避免把 Mg（镁）改成 mg 之类的误伤
+  }
+
+  var UNIT_START = 'A-Za-z\\u03BC\\u00B5\\u2126\\u00B0\\u2103';
+  var UNIT_BODY = 'A-Za-z\\u03BC\\u00B5\\u2126\\u00B0\\u2070-\\u209F0-9\\/\\u00B7\\u2212';
+  var SUP_MAP = { '0': '\u2070', '1': '\u00B9', '2': '\u00B2', '3': '\u00B3', '4': '\u2074',
+                  '5': '\u2075', '6': '\u2076', '7': '\u2077', '8': '\u2078', '9': '\u2079' };
+
+  /* 后面常跟数值的缩写：与数字之间要加空格（pH 7.4、MOI 0.5） */
+  var ABBR_NUM = ['pH', 'MOI', 'OD', 'IC', 'EC', 'LD', 'pI', 'Tm', 'Km', 'Vmax', 'Kd', 'Rf', 'MIC', 'CC'];
+
+  function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  /** 对一段文本做单位规范化；hits 用于统计。返回新文本。 */
+  function fixUnitString(s, o, hits) {
+    var db = unitDB(), out = String(s || '');
+
+    // ① 全角数字 / 字母 / 空格 → 半角
+    if (o.halfWidth) {
+      out = out.replace(/[\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]/g, function (ch) {
+        hits.half++;
+        return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+      }).replace(/[\u3000\u00A0]/g, function () { hits.half++; return ' '; });
+    }
+
+    // ② 温度符号统一：℃ → °C（按设置决定空格）
+    if (o.celsius === 'degree' && out.indexOf('\u2103') >= 0) {
+      out = out.replace(/(\d)?\s*\u2103/g, function (m, d) {
+        hits.celsius++;
+        return (d || '') + (o.celsiusSpace === false ? '' : ' ') + '\u00B0C';
+      });
+    }
+
+    // ③ 缩写拼写（不受数字约束）：如 dna→DNA、OD600→OD₆₀₀、pcr→PCR
+    if (o.fixSpelling) {
+      db.words.forEach(function (w) {
+        out = out.replace(new RegExp('\\b' + escapeRe(w.k) + '\\b', 'g'), function () {
+          hits.spelling++;
+          return w.v;
+        });
+      });
+    }
+
+    // ④ 数字 + 单位：拼写纠正 + 空格规范
+    out = out.replace(
+      new RegExp('(\\d)\\s*([' + UNIT_START + '][' + UNIT_BODY + ']*)', 'g'),
+      function (m, d, tok) {
+        var c = canonUnit(tok, db);
+        if (!c) return m;
+        var spaced = /\s/.test(m.slice(1));
+        var isTemp = (c === '\u00B0C' || c === '\u2103');
+        if (isTemp) {
+          if (c !== tok) { hits.spelling++; } else if (spaced !== (o.celsiusSpace !== false)) { hits.space++; }
+          return d + (o.celsiusSpace === false ? '' : ' ') + '\u00B0C';
+        }
+        if (c !== tok) {
+          if (!o.fixSpelling) return m;
+          hits.spelling++;
+        }
+        if (db.noSpace[c]) {                       // % ‰ ° ′ ″ 之类紧贴数字
+          if (spaced) hits.tight++;
+          return d + c;
+        }
+        if (!o.spaceNumber) return d + (c !== tok ? '' : (spaced ? ' ' : '')) + c;
+        if (!spaced) hits.space++;
+        return d + ' ' + c;
+      });
+
+    // ⑤ 百分号 / 千分号 / 角度符号：去掉与数字之间的空格（°C 的 ° 不处理）
+    if (o.tightPercent) {
+      out = out.replace(/(\d)\s+([%\u2030\u2032\u2033]|\u00B0(?!C))/g, function (m, d, sym) {
+        hits.tight++;
+        return d + sym;
+      });
+    }
+
+    // ⑥ 数学符号两侧加空格（= < > ≤ ≥ ± × ÷ +）
+    if (o.mathSpace) {
+      out = out.replace(/([^\s])\s*([=<>\u2264\u2265\u00B1\u00D7\u00F7])\s*([^\s])/g, function (m, a, op, b) {
+        if (m === a + ' ' + op + ' ' + b) return m;
+        hits.math++;
+        return a + ' ' + op + ' ' + b;
+      });
+      out = out.replace(/([0-9A-Za-z)])\s*\+\s*([0-9A-Za-z(])/g, function (m, a, b) {
+        if (m === a + ' + ' + b) return m;
+        hits.math++;
+        return a + ' + ' + b;
+      });
+    }
+
+    // ⑥b 缩写与紧跟的数字之间加空格：pH7.4 → pH 7.4、MOI0.5 → MOI 0.5
+    if (o.abbrSpace !== false) {
+      ABBR_NUM.forEach(function (a) {
+        out = out.replace(new RegExp('\\b' + a + '(?=[0-9])', 'g'), function () {
+          hits.abbr++;
+          return a + ' ';
+        });
+      });
+    }
+
+    // ⑦ 乘号：数字之间的 x / X / *  → ×
+    if (o.timesSign) {
+      out = out.replace(/(\d)\s*[xX*]\s*(\d)/g, function (m, a, b) {
+        hits.times++;
+        return a + ' \u00D7 ' + b;
+      });
+    }
+
+    // ⑧ 斜杠两侧不留空格
+    if (o.slashTight) {
+      out = out.replace(/([0-9A-Za-z\u03BC\u00B5])\s*\/\s*([0-9A-Za-z\u03BC\u00B5])/g, function (m, a, b) {
+        if (m === a + '/' + b) return m;
+        hits.slash++;
+        return a + '/' + b;
+      });
+    }
+
+    // ⑨ 幂次与上下标（10^10 → 10¹⁰；cm2/m3 由词典负责）
+    if (o.superDigit) {
+      out = out.replace(/(\d)\^(\d+)/g, function (m, a, b) {
+        hits.super++;
+        return a + b.split('').map(function (ch) { return SUP_MAP[ch] || ch; }).join('');
+      });
+    }
+
+    return out;
+  }
+
+  function newUnitHits() {
+    return { spelling: 0, space: 0, tight: 0, math: 0, times: 0, slash: 0, half: 0, celsius: 0, super: 0, abbr: 0 };
+  }
+
+  function unitHitsTotal(h) {
+    return h.spelling + h.space + h.tight + h.math + h.times + h.slash + h.half + h.celsius + h.super + (h.abbr || 0);
+  }
+
+  /** 对段落做数字与单位规范修正（直接改 w:t 文本，不影响格式） */
+  function applyUnitFormat(para, params, report, scriptMap) {
+    var o = params.unit;
+    if (!o || !o.enabled) return 0;
+    var ts = para.getElementsByTagNameNS(W, 't');
+    var hits = newUnitHits(), n = 0;
+    for (var i = 0; i < ts.length; i++) {
+      var t = ts[i];
+      var raw = t.textContent || '';
+      if (!raw) continue;
+      // 角标所在 run 的文本：只做拼写与半角，不做空格调整（保护角标）
+      var isScript = !!(scriptMap && scriptMap.size && scriptMap.has(t.parentNode));
+      var opt = isScript ? {
+        halfWidth: o.halfWidth, fixSpelling: o.fixSpelling, celsius: 'keep',
+        celsiusSpace: o.celsiusSpace, spaceNumber: false, tightPercent: false,
+        mathSpace: false, timesSign: false, slashTight: false, superDigit: false
+      } : o;
+      var fixed = fixUnitString(raw, opt, hits);
+      if (fixed !== raw) {
+        t.textContent = fixed;
+        if (!t.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'space')) {
+          O.attr(t, 'xml:space', 'preserve');
+        }
+        n++;
+      }
+    }
+    var total = unitHitsTotal(hits);
+    if (total) {
+      report.unitFixed = (report.unitFixed || 0) + total;
+      report.unitHits = report.unitHits || {};
+      Object.keys(hits).forEach(function (k) {
+        if (hits[k]) report.unitHits[k] = (report.unitHits[k] || 0) + hits[k];
+      });
+    }
+    return total;
+  }
+
+  /** 只扫描不修改：给"格式检测"用 */
+  function scanUnitIssues(xmlDoc, params) {
+    var o = params.unit || {};
+    var db = unitDB();
+    var hits = newUnitHits(), samples = [];
+    var ps = xmlDoc.getElementsByTagNameNS(W, 'p');
+    for (var i = 0; i < ps.length; i++) {
+      var ts = ps[i].getElementsByTagNameNS(W, 't');
+      for (var j = 0; j < ts.length; j++) {
+        var raw = ts[j].textContent || '';
+        if (!raw || raw.length < 2) continue;
+        var h = newUnitHits();
+        var fixed = fixUnitString(raw, Store_mergeUnit(o), h);
+        if (fixed === raw) continue;
+        var t = unitHitsTotal(h);
+        if (!t) continue;
+        Object.keys(h).forEach(function (k) { hits[k] += h[k]; });
+        if (samples.length < 6) samples.push(raw.slice(0, 34));
+      }
+    }
+    return { hits: hits, total: unitHitsTotal(hits), samples: samples, db: db };
+  }
+
+  /** 扫描时一律按"全开"评估，这样用户能看到有多少问题可修 */
+  function Store_mergeUnit(o) {
+    return {
+      halfWidth: o.halfWidth !== false, fixSpelling: o.fixSpelling !== false,
+      celsius: o.celsius || 'degree', celsiusSpace: o.celsiusSpace !== false,
+      spaceNumber: o.spaceNumber !== false, tightPercent: o.tightPercent !== false,
+      mathSpace: o.mathSpace !== false, timesSign: o.timesSign !== false,
+      slashTight: o.slashTight !== false, superDigit: !!o.superDigit
+    };
+  }
+
   function transformPart(xmlDoc, params, opts) {
     var report = opts.report;
     var partKind = opts.partKind || 'document';
@@ -1484,6 +1729,8 @@
       cleanSpaces(para, ep, report, scriptMap);
       // 3.3 标点整改
       fixPunctuation(para, ep, report, scriptMap);
+      // 3.35 数字与单位规范（知识库驱动：ul→μL、10μL→10 μL、95 %→95%…）
+      applyUnitFormat(para, ep, report, scriptMap);
       // 3.4 字体/字号/颜色（中文-数字-西文分离）
       var applyFont = (ctx.kind === 'heading') ? ep.headings.enabled
                     : (ctx.kind === 'caption') ? ep.caption.enabled
@@ -1830,8 +2077,32 @@
               + (params.table.applyParagraph ? ' · 同时统一行距与对齐' : ''),
         samples: [], fix: null });
     }
-    if (stats.chars < 30 && stats.images > 0) {
-      add({ id: 'image_only', category: '总览', level: 'high',
+    /* ---- 数字与单位规范（知识库驱动的检查） ---- */
+    try {
+      var us = scanUnitIssues(xmlDoc, params);
+      if (us.total > 0) {
+        var h = us.hits, parts = [];
+        if (h.spelling) parts.push('单位拼写 ' + h.spelling);
+        if (h.space) parts.push('缺空格 ' + h.space);
+        if (h.tight) parts.push('多余空格 ' + h.tight);
+        if (h.math) parts.push('数学符号 ' + h.math);
+        if (h.times) parts.push('乘号 ' + h.times);
+        if (h.slash) parts.push('斜杠空格 ' + h.slash);
+        if (h.half) parts.push('全角字符 ' + h.half);
+        if (h.celsius) parts.push('温度符号 ' + h.celsius);
+        if (h.super) parts.push('上标 ' + h.super);
+        add({ id: 'unit_format', category: '数字与单位', level: h.spelling + h.space > 5 ? 'medium' : 'low',
+          title: '数字与单位格式不规范（' + us.total + ' 处）', count: us.total,
+          detail: '依据《实验论文数字 & 单位格式规范》检测：' + parts.join(' · ') +
+                  '。例：ul→μL、10μL→10 μL、95 %→95%、P<0.05→P < 0.05。',
+          samples: us.samples,
+          fix: { 'unit.enabled': true, 'unit.fixSpelling': true, 'unit.spaceNumber': true,
+                 'unit.tightPercent': true, 'unit.mathSpace': true, 'unit.timesSign': true,
+                 'unit.slashTight': true, 'unit.halfWidth': true } });
+      }
+    } catch (e) { /* 检查失败不影响其它检测 */ }
+
+    if (stats.chars < 30 && stats.images > 0) {      add({ id: 'image_only', category: '总览', level: 'high',
         title: '文档内容是图片（扫描件 / 截图），没有可编辑文字', count: stats.images,
         detail: '这份文档的文字是"画"在图片里的，不是真正的文字，任何排版工具都无法修改其中的文字内容。'
               + '请先用 OCR 把它转成可编辑文字（Word：「图片转文字」；WPS：「PDF/图片转文字」；'
@@ -1857,7 +2128,8 @@
       tableContext: tableContext, collectScriptRuns: collectScriptRuns,
       buildRangePlan: buildRangePlan, parseNumSpec: parseNumSpec, isTocLike: isTocLike,
       isNumericCellText: isNumericCellText, textWidthTwips: textWidthTwips,
-      pageSummary: pageSummary
+      pageSummary: pageSummary,
+      scanUnitIssues: scanUnitIssues, fixUnitString: fixUnitString, unitDB: unitDB, newUnitHits: newUnitHits
     }
   };
 })(typeof window !== 'undefined' ? window : this);

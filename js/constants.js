@@ -7,7 +7,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
 
   /* ---------------------------------------------------------------------------
    * 1. 默认参数（与界面一一对应）
@@ -110,6 +110,22 @@
       manualParas: [],           // 手动标记"不整改"的段落序号
       sectionRules: {},          // { "2": { enabled:false } } 或 { "3": { templateId:"gov" } }
       highlight: true            // 原文档预览中高亮"不会被整改"的区域
+    },
+
+    /* 数字与单位规范（词典来自 js/knowledge.js：《实验论文数字&单位格式规范》校订版） */
+    unit: {
+      enabled: false,          // 总开关（默认关闭：需要时再启用）
+      fixSpelling: true,       // 单位拼写与大小写：ul→μL、KD→kDa、ml→mL…
+      spaceNumber: true,       // 数字与单位之间加空格：10μL → 10 μL
+      tightPercent: true,      // % ‰ ° ′ ″ 与数字紧贴：95 % → 95%
+      celsius: 'degree',       // 温度统一：degree(°C) | char(℃) | keep
+      celsiusSpace: true,      // °C 前加空格（37 °C）；关闭则 37°C
+      mathSpace: true,         // = < > ≤ ≥ ± × ÷ + 前后加空格
+      timesSign: true,         // 数字之间的 x / * → ×
+      slashTight: true,        // 斜杠两侧不留空格：5 ng / μL → 5 ng/μL
+      halfWidth: true,         // 全角数字/字母/空格 → 半角
+      superDigit: false,       // 10^10 → 10¹⁰（改动较大，默认关闭）
+      abbrSpace: true          // 缩写与数字之间加空格：pH7.4 → pH 7.4
     },
 
     /* 标题层级标准化 */
