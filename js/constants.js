@@ -35,10 +35,12 @@
     /* 数字格式（可与正文分离） */
     digit: {
       enabled: true,             // 开启后：数字单独使用下面的字体/字号/颜色
-      body:    { font: 'Times New Roman', size: 12,   bold: false, color: '#000000' }, // 正文数字
-      heading: { font: 'Times New Roman', size: 14,   bold: true,  color: '#000000' }, // 标题数字
-      caption: { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000' }, // 注释(图表题注)数字
-      table:   { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000' }  // 表格内数字
+      // independent=false（默认）时：数字只换字体，字号与加粗跟随所在正文/标题/注释/表格，
+      // 避免出现"正文小四、数字却是五号"这类意外差异。
+      body:    { font: 'Times New Roman', size: 12,   bold: false, color: '#000000', independent: false }, // 正文数字
+      heading: { font: 'Times New Roman', size: 16,   bold: true,  color: '#000000', independent: false }, // 标题数字
+      caption: { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000', independent: false }, // 注释(图表题注)数字
+      table:   { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000', independent: false }  // 表格内数字
     },
 
     /* 表格专项格式化（独立于正文，可按需开启） */
@@ -46,7 +48,8 @@
       enabled: false,            // 关闭时：表格文字跟随正文设置；开启后使用下面的独立设置
       cnFont: '宋体',            // 表格中文字体
       latinFont: 'Times New Roman', // 表格西文字体
-      size: 10.5,                // 表格字号(磅)
+      sizeFollow: true,          // 表格字号跟随正文（默认，避免"工具说小四、Word 显示五号"）
+      size: 10.5,                // 表格字号(磅)，关闭"跟随正文"后才生效
       bold: false,               // 表格文字加粗
       color: '#000000',          // 表格文字颜色
       headerBold: true,          // 表头行加粗

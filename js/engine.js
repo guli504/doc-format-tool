@@ -464,18 +464,19 @@
     if (ctx.kind === 'table') {
       var t = params.table || {};
       var on = !!t.enabled;
+      // 表格字号：默认跟随正文，避免出现"正文小四、表格五号"的意外差异
+      var tSize = (t.sizeFollow === false) ? t.size : params.body.size;
       return {
         cn: on ? t.cnFont : params.body.cnFont,
         latin: on ? t.latinFont : params.body.latinFont,
-        size: on ? t.size : params.body.size,
+        size: on ? tSize : params.body.size,
         bold: on ? t.bold : params.body.bold,
         color: on ? t.color : params.body.color,
         digit: (params.digit && (params.digit.table || params.digit.body)) || { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000' },
         digitOn: params.digit.enabled,
         table: true,
         forceBold: on && t.headerBold && ctx.header
-      };
-    }
+      };    }
     if (ctx.kind === 'heading') {
       var h = params.headings['h' + Math.min(ctx.level || 1, 3)] || params.headings.h3;
       return {
@@ -517,8 +518,14 @@
     var cnFont = f.cn, latinFont = f.latin;
 
     if (cls === 'digit' && f.digitOn) {
-      size = f.digit.size; bold = f.digit.bold; color = f.digit.color;
       latinFont = f.digit.font;
+      // 默认只换字体；只有显式开启"独立设置字号与加粗"时才用数字自己的字号/加粗，
+      // 否则字号与加粗跟随所在正文/标题/注释/表格，避免忽大忽小。
+      if (f.digit.independent) {
+        size = f.digit.size;
+        bold = f.digit.bold;
+      }
+      color = f.digit.color || color;
     }
     if (f.forceBold) bold = true;   // 表格表头行强制加粗
 

@@ -116,6 +116,7 @@
   function onParamChange() {
     state.params = collectParams();
     Store.saveParams(state.params);
+    updateSizeNames();
     markStale();
     scheduleAutoRun();
   }
@@ -358,6 +359,67 @@
     var done = state.files.some(function (f) { return !!f.blob; });
     $('#btnExportDocx').disabled = !done;
     $('#btnExportPdf').disabled = !done;
+  }
+
+  /* -------------------- 字号中文名对照（实时显示） -------------------- */
+  function sizeNameText(pt) {
+    if (!pt || isNaN(pt)) return '';
+    var exact = DFT.FONT_SIZES.filter(function (s) { return Math.abs(s.value - pt) < 0.01; })[0];
+    if (exact) return exact.label.split(' ')[0] + '（' + exact.value + ' 磅）';
+    var near = null, best = 999;
+    DFT.FONT_SIZES.forEach(function (s) {
+      var d = Math.abs(s.value - pt);
+      if (d < best) { best = d; near = s; }
+    });
+    if (near && best <= 0.75) return '≈ ' + near.label.split(' ')[0] + '（' + near.value + ' 磅）';
+    return '自定义字号';
+  }
+
+  function initSizeNames() {
+    $$('input[data-param]').forEach(function (el) {
+      var path = el.dataset.param || '';
+      if (!/(^|\.)size$/.test(path)) return;       // 只给"字号"输入框加
+      if (el.dataset.sizeNameBound) return;
+      el.dataset.sizeNameBound = '1';
+      var tag = document.createElement('span');
+      tag.className = 'size-name';
+      tag.setAttribute('data-size-name', path);
+      if (el.parentNode) el.parentNode.appendChild(tag);
+      var update = function () { updateSizeNames(); };
+      el.addEventListener('input', update);
+      el.addEventListener('change', update);
+    });
+    updateSizeNames();
+  }
+
+  function updateSizeNames() {
+    var followEl = document.querySelector('[data-param="table.sizeFollow"]');
+    var bodyEl = document.querySelector('[data-param="body.size"]');
+    $$('[data-size-name]').forEach(function (tag) {
+      var path = tag.getAttribute('data-size-name');
+      var el = document.querySelector('[data-param="' + path + '"]');
+      if (!el) { tag.textContent = ''; return; }
+      // 表格字号勾了"跟随正文"时，直接告诉用户实际会按哪个字号执行
+      if (path === 'table.size' && followEl && followEl.checked && bodyEl) {
+        tag.textContent = '实际按正文执行：' + sizeNameText(parseFloat(bodyEl.value));
+        return;
+      }
+      if (path === 'digit.table.size') {
+        var dFollow = document.querySelector('[data-param="digit.table.independent"]');
+        if (dFollow && !dFollow.checked && followEl && followEl.checked && bodyEl) {
+          tag.textContent = '实际跟随表格字号：' + sizeNameText(parseFloat(bodyEl.value));
+          return;
+        }
+      }
+      if (path.indexOf('digit.') === 0) {
+        var ind = document.querySelector('[data-param="' + path.replace(/\.size$/, '.independent') + '"]');
+        if (ind && !ind.checked) {
+          tag.textContent = '不勾选"独立设置"时按所在正文执行';
+          return;
+        }
+      }
+      tag.textContent = sizeNameText(parseFloat(el.value));
+    });
   }
 
   /* ========================= 表格模板 / 分节规则 / 范围高亮 ========================= */
@@ -775,7 +837,7 @@
     }).join('');
     $('#headingBoxes').innerHTML = html;
     $('#sizeList').innerHTML = DFT.FONT_SIZES.map(function (s) {
-      return '<option value="' + s.value + '">' + s.label + '</option>';
+      return '<option value="' + s.value + '">' + s.label.replace(' ', ' = ') + ' 磅</option>';
     }).join('');
   }
 
@@ -1111,6 +1173,7 @@
     applyParams(state.params);
     refreshFontSelects();
     applyParams(state.params);
+    initSizeNames();
     pushHistory(state.params);
     initDropzone();
     initParamBindings();

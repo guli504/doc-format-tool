@@ -127,7 +127,8 @@
               <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.body.size" data-type="number"></label>
               <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.body.color" data-type="text"></label>
               <label class="inline mid"><input type="checkbox" data-param="digit.body.bold" data-type="bool"> 加粗</label>
-            </div>
+            
+            <label class="inline"><input type="checkbox" data-param="digit.body.independent" data-type="bool"> 独立设置数字字号与加粗（不勾选则只换字体，字号跟随正文）</label></div>
           </div>
           <div class="subsec"><div class="sub-title">标题数字</div>
             <label class="field"><span>字体</span><select class="input" data-param="digit.heading.font" data-type="text" data-font-select="en"></select></label>
@@ -135,7 +136,8 @@
               <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.heading.size" data-type="number"></label>
               <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.heading.color" data-type="text"></label>
               <label class="inline mid"><input type="checkbox" data-param="digit.heading.bold" data-type="bool"> 加粗</label>
-            </div>
+            
+            <label class="inline"><input type="checkbox" data-param="digit.heading.independent" data-type="bool"> 独立设置数字字号与加粗（不勾选则只换字体，字号跟随标题）</label></div>
           </div>
           <div class="subsec"><div class="sub-title">注释数字（图表题注）</div>
             <label class="field"><span>字体</span><select class="input" data-param="digit.caption.font" data-type="text" data-font-select="en"></select></label>
@@ -143,7 +145,8 @@
               <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.caption.size" data-type="number"></label>
               <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.caption.color" data-type="text"></label>
               <label class="inline mid"><input type="checkbox" data-param="digit.caption.bold" data-type="bool"> 加粗</label>
-            </div>
+            
+            <label class="inline"><input type="checkbox" data-param="digit.caption.independent" data-type="bool"> 独立设置数字字号与加粗（不勾选则只换字体，字号跟随注释）</label></div>
           </div>
           <div class="subsec"><div class="sub-title">表格数字</div>
             <label class="field"><span>字体</span><select class="input" data-param="digit.table.font" data-type="text" data-font-select="en"></select></label>
@@ -151,7 +154,8 @@
               <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.table.size" data-type="number"></label>
               <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.table.color" data-type="text"></label>
               <label class="inline mid"><input type="checkbox" data-param="digit.table.bold" data-type="bool"> 加粗</label>
-            </div>
+            
+            <label class="inline"><input type="checkbox" data-param="digit.table.independent" data-type="bool"> 独立设置数字字号与加粗（不勾选则只换字体，字号跟随表格）</label></div>
           </div>
         </div>
       </details>
@@ -172,6 +176,7 @@
           <div class="subsec"><div class="sub-title">表格内文字（不受正文规则影响）</div>
             <label class="field"><span>表格中文字体</span><select class="input" data-param="table.cnFont" data-type="text" data-font-select="cn"></select></label>
             <label class="field"><span>表格西文字体</span><select class="input" data-param="table.latinFont" data-type="text" data-font-select="en"></select></label>
+            <label class="inline"><input type="checkbox" data-param="table.sizeFollow" data-type="bool"> 表格字号跟随正文（推荐；不勾选才使用下面单独设置的字号）</label>
             <div class="grid3">
               <label class="field"><span>字号(磅)</span><input class="input" type="number" step="0.5" min="5" max="72" list="sizeList" data-param="table.size" data-type="number"></label>
               <label class="field"><span>颜色</span><input class="input color" type="color" data-param="table.color" data-type="text"></label>
