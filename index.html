@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文档格式批量整改工具 · 纯本地 · 不上传</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6fed'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23fff' font-family='Microsoft YaHei,sans-serif'%3E%E6%96%87%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ============================ 顶栏 ============================ -->
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">文</div>
+    <div class="brand-text">
+      <h1>文档格式批量整改工具</h1>
+      <p>Word 字体 / 排版 / 符号 / 注释 一键标准化</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span class="badge badge-privacy" title="所有文件仅在本机浏览器中处理，绝不联网上传">🔒 纯本地处理 · 文件不上传</span>
+    <button class="btn btn-ghost" id="btnHelp">使用说明</button>
+    <button class="btn btn-ghost" id="btnExportCfg" title="把当前参数、模板、字体库导出为 JSON 备份">导出配置</button>
+    <button class="btn btn-ghost" id="btnImportCfg" title="从 JSON 备份恢复参数、模板、字体库">导入配置</button>
+    <input type="file" id="cfgFile" accept=".json" hidden>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ======================= 左侧：参数设置区 ======================= -->
+  <aside class="side">
+    <div class="side-head">
+      <h2>参数设置区</h2>
+      <div class="side-head-actions">
+        <button class="btn btn-mini" id="btnUndo" title="撤销 (Ctrl+Z)">↶ 撤销</button>
+        <button class="btn btn-mini" id="btnRedo" title="重做 (Ctrl+Y)">↷ 重做</button>
+        <button class="btn btn-mini btn-danger-ghost" id="btnReset" title="恢复所有参数为默认值">重置设置</button>
+      </div>
+    </div>
+
+    <div class="side-scroll">
+
+      <!-- 1. 文档导入 -->
+      <details class="sec" open>
+        <summary>① 文档导入 <span class="sec-tag" id="tagImport">未选择</span></summary>
+        <div class="sec-body">
+          <div class="dropzone" id="dropzone">
+            <div class="dz-icon">📄</div>
+            <div class="dz-main">把 Word 文档拖到这里</div>
+            <div class="dz-sub">或 <button class="link-btn" id="btnPick">点击选择文件</button> ·
+              <button class="link-btn" id="btnPickDir">选择文件夹</button> · 支持 .docx / .doc / .rtf，可批量</div>
+            <input type="file" id="fileInput" multiple accept=".docx,.doc,.rtf,.txt,.html,.htm" hidden>
+            <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
+          </div>
+          <div class="progress" id="progressWrap" hidden>
+            <div class="progress-bar"><i id="progressBar"></i></div>
+            <div class="progress-text" id="progressText">准备中…</div>
+          </div>
+          <div class="files" id="fileList"></div>
+          <div class="hint" id="importHint"></div>
+        </div>
+      </details>
+
+      <!-- 2. 排版模板 -->
+      <details class="sec" open>
+        <summary>② 排版模板 <span class="sec-tag">5 套内置</span></summary>
+        <div class="sec-body">
+          <div class="tpl-grid" id="tplGrid"></div>
+          <div class="row">
+            <input class="input" id="tplName" placeholder="自定义模板名称">
+            <button class="btn btn-mini" id="btnSaveTpl">保存当前参数为模板</button>
+          </div>
+          <div class="tpl-user" id="tplUserList"></div>
+        </div>
+      </details>
+
+      <!-- 3. 页面设置 -->
+      <details class="sec">
+        <summary>③ 页面设置（页边距）
+          <label class="sw"><input type="checkbox" data-param="page.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <div class="grid2">
+            <label class="field"><span>上 (cm)</span><input class="input" type="number" step="0.01" min="0.5" max="10" data-param="page.top" data-type="number"></label>
+            <label class="field"><span>下 (cm)</span><input class="input" type="number" step="0.01" min="0.5" max="10" data-param="page.bottom" data-type="number"></label>
+            <label class="field"><span>左 (cm)</span><input class="input" type="number" step="0.01" min="0.5" max="10" data-param="page.left" data-type="number"></label>
+            <label class="field"><span>右 (cm)</span><input class="input" type="number" step="0.01" min="0.5" max="10" data-param="page.right" data-type="number"></label>
+          </div>
+          <div class="chips">
+            <button class="chip" data-margin="2.54,2.54,3.17,3.17">论文常用</button>
+            <button class="chip" data-margin="3.7,3.5,2.8,2.6">公文标准</button>
+            <button class="chip" data-margin="2.5,2.5,2.5,2.5">均匀 2.5</button>
+            <button class="chip" data-margin="2.2,2.2,2.5,2.5">紧凑办公</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- 4. 文字格式 -->
+      <details class="sec" open>
+        <summary>④ 文字格式（中文 / 西文）
+          <label class="sw"><input type="checkbox" data-param="body.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <label class="field"><span>中文字体</span><select class="input" data-param="body.cnFont" data-type="text" data-font-select="cn"></select></label>
+          <label class="field"><span>西文字体</span><select class="input" data-param="body.latinFont" data-type="text" data-font-select="en"></select></label>
+          <div class="grid2">
+            <label class="field"><span>字号 (磅)</span><input class="input" type="number" step="0.5" min="5" max="72" list="sizeList" data-param="body.size" data-type="number"></label>
+            <label class="field"><span>字体颜色</span><input class="input color" type="color" data-param="body.color" data-type="text"></label>
+          </div>
+          <label class="inline"><input type="checkbox" data-param="body.bold" data-type="bool"> 正文加粗</label>
+          <datalist id="sizeList"></datalist>
+        </div>
+      </details>
+
+      <!-- 5. 数字格式 -->
+      <details class="sec">
+        <summary>⑤ 数字格式（中英数字分离）
+          <label class="sw"><input type="checkbox" data-param="digit.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <p class="note">开启后，中文与数字可使用不同字体、字号、颜色（按正文 / 标题 / 注释分别设置）。</p>
+          <div class="subsec"><div class="sub-title">正文数字</div>
+            <label class="field"><span>字体</span><select class="input" data-param="digit.body.font" data-type="text" data-font-select="en"></select></label>
+            <div class="grid3">
+              <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.body.size" data-type="number"></label>
+              <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.body.color" data-type="text"></label>
+              <label class="inline mid"><input type="checkbox" data-param="digit.body.bold" data-type="bool"> 加粗</label>
+            </div>
+          </div>
+          <div class="subsec"><div class="sub-title">标题数字</div>
+            <label class="field"><span>字体</span><select class="input" data-param="digit.heading.font" data-type="text" data-font-select="en"></select></label>
+            <div class="grid3">
+              <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.heading.size" data-type="number"></label>
+              <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.heading.color" data-type="text"></label>
+              <label class="inline mid"><input type="checkbox" data-param="digit.heading.bold" data-type="bool"> 加粗</label>
+            </div>
+          </div>
+          <div class="subsec"><div class="sub-title">注释数字（图表题注）</div>
+            <label class="field"><span>字体</span><select class="input" data-param="digit.caption.font" data-type="text" data-font-select="en"></select></label>
+            <div class="grid3">
+              <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.caption.size" data-type="number"></label>
+              <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.caption.color" data-type="text"></label>
+              <label class="inline mid"><input type="checkbox" data-param="digit.caption.bold" data-type="bool"> 加粗</label>
+            </div>
+          </div>
+          <div class="subsec"><div class="sub-title">表格数字</div>
+            <label class="field"><span>字体</span><select class="input" data-param="digit.table.font" data-type="text" data-font-select="en"></select></label>
+            <div class="grid3">
+              <label class="field"><span>字号</span><input class="input" type="number" step="0.5" list="sizeList" data-param="digit.table.size" data-type="number"></label>
+              <label class="field"><span>颜色</span><input class="input color" type="color" data-param="digit.table.color" data-type="text"></label>
+              <label class="inline mid"><input type="checkbox" data-param="digit.table.bold" data-type="bool"> 加粗</label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- 6. 表格文字格式 -->
+      <details class="sec">
+        <summary>⑥ 表格文字格式
+          <label class="sw"><input type="checkbox" data-param="table.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <p class="note">开启后，表格内的文字使用下面这套独立格式；<b>关闭时表格文字跟随「④ 文字格式」的正文设置</b>。</p>
+          <label class="field"><span>表格中文字体</span><select class="input" data-param="table.cnFont" data-type="text" data-font-select="cn"></select></label>
+          <label class="field"><span>表格西文字体</span><select class="input" data-param="table.latinFont" data-type="text" data-font-select="en"></select></label>
+          <div class="grid2">
+            <label class="field"><span>表格字号 (磅)</span><input class="input" type="number" step="0.5" min="5" max="72" list="sizeList" data-param="table.size" data-type="number"></label>
+            <label class="field"><span>表格文字颜色</span><input class="input color" type="color" data-param="table.color" data-type="text"></label>
+          </div>
+          <label class="inline"><input type="checkbox" data-param="table.bold" data-type="bool"> 表格文字全部加粗</label>
+          <label class="inline"><input type="checkbox" data-param="table.headerBold" data-type="bool"> 表头行（第一行 / 设置了“重复标题行”的行）加粗</label>
+          <label class="inline"><input type="checkbox" data-param="table.applyParagraph" data-type="bool"> 同时统一表格内的行距与对齐</label>
+          <div class="grid2">
+            <label class="field"><span>表格行距</span>
+              <select class="input" data-param="table.lineMode" data-type="text">
+                <option value="multiple">多倍行距</option>
+                <option value="fixed">固定值(磅)</option>
+                <option value="atLeast">最小值(磅)</option>
+              </select>
+            </label>
+            <label class="field"><span>行距值</span><input class="input" type="number" step="0.05" min="0" data-param="table.lineValue" data-type="number"></label>
+          </div>
+          <label class="field"><span>表格对齐</span>
+            <select class="input" data-param="table.align" data-type="text">
+              <option value="">不改动</option>
+              <option value="center">居中</option>
+              <option value="left">左对齐</option>
+              <option value="right">右对齐</option>
+              <option value="justify">两端对齐</option>
+            </select>
+          </label>
+          <p class="note">表格里的数字还会额外套用「⑤ 数字格式 → 表格数字」指定的字体与字号。</p>
+        </div>
+      </details>
+
+      <!-- 7. 标题层级 -->
+      <details class="sec">
+        <summary>⑦ 标题层级标准化
+          <label class="sw"><input type="checkbox" data-param="headings.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <label class="inline"><input type="checkbox" data-param="headings.heuristic" data-type="bool"> 智能识别标题（未套用标题样式的文档也能纠正）</label>
+          <label class="field"><span>编号识别规则</span>
+            <select class="input" data-param="headings.numbering" data-type="text">
+              <option value="auto">自动判别</option>
+              <option value="chapter">章节式（第1章 / 1.1 / 1.1.1）</option>
+              <option value="chinese">汉字式（一、/（一）/ 1.）</option>
+            </select>
+          </label>
+          <div id="headingBoxes"></div>
+        </div>
+      </details>
+
+      <!-- 8. 段落排版 -->
+      <details class="sec" open>
+        <summary>⑧ 段落排版
+          <label class="sw"><input type="checkbox" data-param="paragraph.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <div class="grid2">
+            <label class="field"><span>行距方式</span>
+              <select class="input" data-param="paragraph.lineMode" data-type="text">
+                <option value="multiple">多倍行距</option>
+                <option value="fixed">固定值(磅)</option>
+                <option value="atLeast">最小值(磅)</option>
+              </select>
+            </label>
+            <label class="field"><span>行距值</span><input class="input" type="number" step="0.05" min="0" max="200" data-param="paragraph.lineValue" data-type="number"></label>
+            <label class="field"><span>段前距 (磅)</span><input class="input" type="number" step="1" min="0" max="200" data-param="paragraph.before" data-type="number"></label>
+            <label class="field"><span>段后距 (磅)</span><input class="input" type="number" step="1" min="0" max="200" data-param="paragraph.after" data-type="number"></label>
+            <label class="field"><span>首行缩进 (字符)</span><input class="input" type="number" step="1" min="0" max="4" data-param="paragraph.indentChars" data-type="number"></label>
+            <label class="field"><span>正文对齐</span>
+              <select class="input" data-param="paragraph.align" data-type="text">
+                <option value="justify">两端对齐</option>
+                <option value="left">左对齐</option>
+                <option value="center">居中</option>
+                <option value="right">右对齐</option>
+              </select>
+            </label>
+          </div>
+          <label class="inline"><input type="checkbox" data-param="paragraph.skipHeadingIndent" data-type="bool"> 标题不首行缩进</label>
+          <label class="inline"><input type="checkbox" data-param="paragraph.skipShortLineIndent" data-type="bool"> 短句不首行缩进（不超过
+            <input class="input tiny" type="number" min="0" max="200" data-param="paragraph.shortLineMax" data-type="number"> 字）</label>
+          <label class="inline"><input type="checkbox" data-param="paragraph.keepListIndent" data-type="bool"> 列表 / 编号段落保留自身缩进</label>
+        </div>
+      </details>
+
+      <!-- 9. 标点符号 -->
+      <details class="sec">
+        <summary>⑨ 标点符号整改
+          <label class="sw"><input type="checkbox" data-param="punctuation.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <label class="field"><span>整改模式</span>
+            <select class="input" data-param="punctuation.mode" data-type="text">
+              <option value="smart">智能（中文用中文标点 / 英文用英文标点）</option>
+              <option value="full">统一全角（中文标点）</option>
+              <option value="half">统一半角（英文标点）</option>
+              <option value="clean">仅清理乱码与异常符号</option>
+            </select>
+          </label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.cleanGarbage" data-type="bool"> 清除乱码 / 不可见字符</label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.halfWidthToHalf" data-type="bool"> 全角字母数字转半角</label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.smartQuotes" data-type="bool"> 引号成对智能修正</label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.protectDecimal" data-type="bool"> 保护小数点与编号（3.14、1,000、10:30）</label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.protectUrl" data-type="bool"> 保护网址 / 邮箱 / 文件名</label>
+          <label class="inline"><input type="checkbox" data-param="punctuation.collapseRepeats" data-type="bool"> 合并重复标点（！！！→！）</label>
+        </div>
+      </details>
+
+      <!-- 10. 空格空行 -->
+      <details class="sec">
+        <summary>⑩ 空格 / 空行清理
+          <label class="sw"><input type="checkbox" data-param="whitespace.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <label class="inline"><input type="checkbox" data-param="whitespace.trimEnds" data-type="bool"> 清除段首尾多余空格</label>
+          <label class="inline"><input type="checkbox" data-param="whitespace.collapseSpaces" data-type="bool"> 合并段落中间连续空格</label>
+          <label class="inline"><input type="checkbox" data-param="whitespace.fullWidthSpaceToHalf" data-type="bool"> 全角空格转半角</label>
+          <label class="inline"><input type="checkbox" data-param="whitespace.removeEmpty" data-type="bool"> 删除空段落（空行）</label>
+          <label class="inline"><input type="checkbox" data-param="whitespace.removePageBreakInEmpty" data-type="bool"> 删除分页空白页（空段落中的分页符）</label>
+          <label class="field"><span>允许保留的连续空行</span><input class="input" type="number" min="0" max="10" data-param="whitespace.maxEmpty" data-type="number"></label>
+        </div>
+      </details>
+
+      <!-- 11. 图片注释 -->
+      <details class="sec">
+        <summary>⑪ 图片 / 表格题注
+          <label class="sw"><input type="checkbox" data-param="caption.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <div class="grid2">
+            <label class="field"><span>字体</span><select class="input" data-param="caption.font" data-type="text" data-font-select="cn"></select></label>
+            <label class="field"><span>字号 (磅)</span><input class="input" type="number" step="0.5" list="sizeList" data-param="caption.size" data-type="number"></label>
+            <label class="field"><span>行距方式</span>
+              <select class="input" data-param="caption.lineMode" data-type="text">
+                <option value="multiple">多倍行距</option>
+                <option value="fixed">固定值(磅)</option>
+                <option value="atLeast">最小值(磅)</option>
+              </select>
+            </label>
+            <label class="field"><span>行距值</span><input class="input" type="number" step="0.05" data-param="caption.lineValue" data-type="number"></label>
+            <label class="field"><span>对齐方式</span>
+              <select class="input" data-param="caption.align" data-type="text">
+                <option value="center">居中</option><option value="left">左对齐</option>
+                <option value="right">右对齐</option><option value="justify">两端对齐</option>
+              </select>
+            </label>
+            <label class="field"><span>缩进 (字符)</span><input class="input" type="number" min="0" max="4" data-param="caption.indentChars" data-type="number"></label>
+            <label class="field"><span>统一前缀</span><input class="input" placeholder="例如：图 " data-param="caption.prefix" data-type="text"></label>
+            <label class="field"><span>统一后缀</span><input class="input" placeholder="例如：（数据来源：…）" data-param="caption.suffix" data-type="text"></label>
+          </div>
+          <label class="inline"><input type="checkbox" data-param="caption.detectPattern" data-type="bool"> 按“图1 / 表2 / Figure 3”识别题注</label>
+          <label class="inline"><input type="checkbox" data-param="caption.afterImage" data-type="bool"> 图片紧随的短段落视为题注</label>
+          <label class="inline"><input type="checkbox" data-param="caption.bold" data-type="bool"> 题注加粗</label>
+          <label class="field"><span>题注颜色</span><input class="input color" type="color" data-param="caption.color" data-type="text"></label>
+        </div>
+      </details>
+
+      <!-- 12. 公式保护 -->
+      <details class="sec">
+        <summary>⑫ 公式 / 单位保护
+          <label class="sw"><input type="checkbox" data-param="formula.enabled" data-type="bool"><span></span></label>
+        </summary>
+        <div class="sec-body">
+          <label class="inline"><input type="checkbox" data-param="formula.protectUnits" data-type="bool"> 保护含数学 / 单位符号的短片段（℃、±、≤、m²…）</label>
+          <p class="note">开启后，公式（OMML）内部格式不会被修改，避免公式乱码变形。</p>
+        </div>
+      </details>
+
+      <!-- 13. 处理范围 -->
+      <details class="sec">
+        <summary>⑬ 处理范围</summary>
+        <div class="sec-body">
+          <label class="inline"><input type="checkbox" data-param="scope.tables" data-type="bool"> 表格内文字</label>
+          <label class="inline"><input type="checkbox" data-param="scope.textboxes" data-type="bool"> 文本框内文字</label>
+          <label class="inline"><input type="checkbox" data-param="scope.headers" data-type="bool"> 页眉</label>
+          <label class="inline"><input type="checkbox" data-param="scope.footers" data-type="bool"> 页脚</label>
+          <label class="inline"><input type="checkbox" data-param="scope.comments" data-type="bool"> 批注</label>
+          <label class="inline"><input type="checkbox" data-param="scope.footnotes" data-type="bool"> 脚注 / 尾注</label>
+        </div>
+      </details>
+
+      <!-- 14. 字体库 -->
+      <details class="sec">
+        <summary>⑭ 字体自定义库 <span class="sec-tag" id="tagFontCount">0</span></summary>
+        <div class="sec-body">
+          <div class="row">
+            <input class="input" id="fontName" placeholder="新增字体名称（如：方正小标宋简体）">
+            <select class="input narrow" id="fontType"><option value="cn">中文</option><option value="en">西文</option></select>
+            <button class="btn btn-mini" id="btnAddFont">添加</button>
+          </div>
+          <div class="row">
+            <button class="btn btn-mini" id="btnLoadLocalFont">加载本地字体文件预览 (.ttf/.otf)</button>
+            <input type="file" id="localFontFile" accept=".ttf,.otf,.woff,.woff2" hidden>
+          </div>
+          <p class="note">收藏的字体排在字体下拉框最前；删除仅影响本机列表。</p>
+          <div class="font-list" id="fontList"></div>
+        </div>
+      </details>
+
+      <div class="side-foot">
+        <div class="privacy">
+          🔒 本工具为纯前端页面：文档由浏览器在本机解析与重写，不会上传、不会保存到任何服务器。
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======================= 右侧：文档预览区 ======================= -->
+  <section class="main">
+    <div class="toolbar">
+      <button class="btn btn-primary" id="btnUpload">＋ 导入文档</button>
+      <button class="btn btn-go" id="btnRun" disabled>⚡ 一键整改</button>
+      <button class="btn" id="btnDetect" disabled>🔍 格式检测</button>
+      <span class="tb-sep"></span>
+      <button class="btn" id="btnAutoFix" disabled>🛠 一键修复全部问题</button>
+      <span class="tb-sep"></span>
+      <button class="btn" id="btnExportDocx" disabled>⬇ 导出 Word</button>
+      <button class="btn" id="btnExportPdf" disabled>⬇ 导出 PDF</button>
+      <span class="tb-flex"></span>
+      <div class="view-switch" id="viewSwitch">
+        <button class="vs-item" data-view="original">原文档</button>
+        <button class="vs-item active" data-view="split">分屏对比</button>
+        <button class="vs-item" data-view="fixed">整改后</button>
+      </div>
+      <label class="zoom">缩放
+        <select id="zoomSel">
+          <option value="0.6">60%</option>
+          <option value="0.75">75%</option>
+          <option value="0.9">90%</option>
+          <option value="1" selected>100%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="filebar" id="fileBar"></div>
+
+    <div class="preview-body" id="previewBody">
+      <div class="pane" id="paneOriginal">
+        <div class="pane-label">原文档预览</div>
+        <div class="page-host" id="hostOriginal"><div class="empty-state">导入文档后在此显示原文档</div></div>
+      </div>
+      <div class="pane" id="paneFixed">
+        <div class="pane-label">整改后预览 <span class="pane-hint" id="fixedHint"></span></div>
+        <div class="page-host" id="hostFixed"><div class="empty-state">点击“一键整改”后在此显示整改结果</div></div>
+      </div>
+    </div>
+
+    <div class="issues" id="issuesPanel">
+      <div class="issues-head" id="issuesHead">
+        <strong>排版问题清单</strong>
+        <span class="issues-sum" id="issuesSum">尚未检测</span>
+        <span class="tb-flex"></span>
+        <button class="btn btn-mini" id="btnToggleIssues">展开/收起</button>
+      </div>
+      <div class="issues-body" id="issuesBody">
+        <div class="empty-state small">点击“格式检测”扫描文档中的标点、字体、缩进、行距、注释等问题。</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============================ 使用说明弹层 ============================ -->
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <strong>使用说明书</strong>
+      <button class="btn btn-mini" id="btnCloseHelp">关闭</button>
+    </div>
+    <div class="modal-body">
+      <h3>1. 导入文档</h3>
+      <p>把 .docx / .doc / .rtf 文件拖到左侧“文档导入”区域，或点击“点击选择文件”。支持一次选择多个文件批量处理。所有解析都在本机浏览器完成，文件不会上传。</p>
+      <h3>2. 选择模板或自定义参数</h3>
+      <p>左侧 ①～⑭ 是全部设置项：页面边距、文字格式、数字格式、表格文字格式、标题层级、段落排版、标点、空格空行、图片/表格题注、公式保护、处理范围。点击②中的内置模板（公文标准 / 大学论文 / 实习报告 / 日常办公 / 期刊投稿）可一键套用，再按需微调；也可把自己的参数保存为专属模板。</p>
+      <h3>3. 表格文字也能单独设置</h3>
+      <p>「⑥ 表格文字格式」打开后，表格里的文字可以使用与正文不同的字体、字号、颜色，还能让表头行自动加粗；表格里的数字见「⑤ 数字格式 → 表格数字」。不开启时，表格文字跟随正文设置。</p>
+      <h3>4. 一键整改并预览</h3>
+      <p>点击右上“⚡ 一键整改”，右侧会同时显示“原文档”和“整改后”两页，可切换“原文档 / 分屏对比 / 整改后”三种视图，用缩放调节显示比例。</p>
+      <h3>4. 格式检测与一键修复</h3>
+      <p>“格式检测”会扫描标点混用、字体混乱、缩进不统一、行距错乱、图片注释缺失、空行过多、标题未用样式、页边距异常等问题，并列出问题清单；点“一键修复全部问题”会自动打开对应参数并重新整改。</p>
+      <h3>5. 导出</h3>
+      <p>“导出 Word”生成整改后的 .docx（保留图片、公式、批注、表格、超链接等全部对象；多文件会打包为 zip）。<br>
+      “导出 PDF”会打开打印窗口，选择“另存为 PDF”即可，版式与预览一致。</p>
+      <h3>6. 撤销 / 重做 / 重置</h3>
+      <p>每个参数改动都会记录历史，可逐步撤销与重做（快捷键 Ctrl+Z / Ctrl+Y）；“重置设置”恢复出厂参数。参数、模板、字体库都会自动保存在本机浏览器中，下次打开自动恢复。</p>
+      <h3>7. 注意事项</h3>
+      <ul>
+        <li>旧版 .doc 是二进制格式，浏览器只能提取其中的文字（图片、公式等二进制对象无法读取），导出时会转换为 .docx。</li>
+        <li>公式（OMML）默认被保护，不参与字体整改，因此不会被改乱。</li>
+        <li>预览使用本机字体渲染；若某字体未安装，会用相近字体代替显示，但导出的文档中字体名称是正确的。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/vendor/jszip.min.js"></script>
+<script src="js/constants.js"></script>
+<script src="js/store.js"></script>
+<script src="js/ooxml.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/render.js"></script>
+<script src="js/legacy-doc.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
