@@ -1100,6 +1100,8 @@
     renderTemplates();
     renderTableTemplates();
     renderFontLibrary();
+    var vb = document.getElementById('verBadge');
+    if (vb) { vb.textContent = 'v' + DFT.VERSION; }
     var ui = Store.loadUI();
     state.view = ui.view || 'split';
     state.zoom = ui.zoom || 1;

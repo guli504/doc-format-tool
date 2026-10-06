@@ -55,8 +55,31 @@
   }
 
   /* ------------------------------- 参数存取 ------------------------------- */
+  /* 参数结构版本：升级时做一次性迁移。
+     v2 迁移的原因：早期版本把"空颜色"经 <input type="color"> 回写成了 #000000，
+     导致只要打开表格格式开关就会把单元格刷成黑色。这里把这类残留值清理掉。 */
+  var PARAMS_VERSION = 2;
+
   function loadParams() {
-    return merge(global.DFT.DEFAULT_PARAMS, read('params', {}));
+    var saved = read('params', {}) || {};
+    var ver = read('paramsVersion', 1);
+    if (!(ver >= PARAMS_VERSION)) {
+      var def = global.DFT.DEFAULT_PARAMS;
+      if (saved.table) {
+        saved.table.headerFill = def.table.headerFill;
+        saved.table.bodyFill = def.table.bodyFill;
+        saved.table.headerFillOn = false;
+        saved.table.bodyFillOn = false;
+      }
+      if (saved.script) {
+        saved.script.color = def.script.color;
+        saved.script.colorOn = false;
+      }
+      write('params', saved);
+      write('paramsVersion', PARAMS_VERSION);
+      console.info('[文档整改工具] 已清理旧版本残留的颜色设置（避免表格黑底）');
+    }
+    return merge(global.DFT.DEFAULT_PARAMS, saved);
   }
 
   function saveParams(params) {

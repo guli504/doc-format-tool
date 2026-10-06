@@ -74,6 +74,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   font-size: 11.5px; padding: 5px 10px; border-radius: 20px;
   background: #eafaf3; color: #12805c; border: 1px solid #c9f0e0; white-space: nowrap;
 }
+.badge-version { background: #eef1f6; color: var(--text-2); border-color: var(--line); font-weight: 600; }
 
 /* ------------------------------- 按钮 ------------------------------- */
 .btn {

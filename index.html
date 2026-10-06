@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文档格式批量整改工具 · 纯本地 · 不上传</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6fed'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23fff' font-family='Microsoft YaHei,sans-serif'%3E%E6%96%87%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=101">
 </head>
 <body>
 
@@ -19,6 +19,7 @@
     </div>
   </div>
   <div class="top-actions">
+    <span class="badge badge-version" id="verBadge" title="如果这里显示的不是最新版本号，说明浏览器用的是缓存的旧代码，请按 Ctrl+F5 强制刷新">v1.0.1</span>
     <span class="badge badge-privacy" title="所有文件仅在本机浏览器中处理，绝不联网上传">🔒 纯本地处理 · 文件不上传</span>
     <button class="btn btn-ghost" id="btnHelp">使用说明</button>
     <button class="btn btn-ghost" id="btnExportCfg" title="把当前参数、模板、字体库导出为 JSON 备份">导出配置</button>
@@ -627,13 +628,13 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/vendor/jszip.min.js"></script>
-<script src="js/constants.js"></script>
-<script src="js/store.js"></script>
-<script src="js/ooxml.js"></script>
-<script src="js/engine.js"></script>
-<script src="js/render.js"></script>
-<script src="js/legacy-doc.js"></script>
-<script src="js/app.js"></script>
+<script src="js/vendor/jszip.min.js?v=101"></script>
+<script src="js/constants.js?v=101"></script>
+<script src="js/store.js?v=101"></script>
+<script src="js/ooxml.js?v=101"></script>
+<script src="js/engine.js?v=101"></script>
+<script src="js/render.js?v=101"></script>
+<script src="js/legacy-doc.js?v=101"></script>
+<script src="js/app.js?v=101"></script>
 </body>
 </html>
