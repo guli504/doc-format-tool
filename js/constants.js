@@ -51,7 +51,8 @@
       color: '#000000',          // 表格文字颜色
       headerBold: true,          // 表头行加粗
       headerDetect: 'firstRow',  // firstRow(首行) | firstRowCol(首行+首列) | none
-      headerFill: '',            // 表头底色（空=不改），如 #DCE6F1
+      headerFill: '#DCE6F1',     // 表头底色（需先勾选 headerFillOn）
+      headerFillOn: false,       // 是否启用表头底色（默认不改动，避免误刷黑底）
       applyParagraph: false,     // 是否统一表格内段落的行距与对齐
       lineMode: 'multiple',      // multiple | fixed | atLeast
       lineValue: 1.0,
@@ -61,7 +62,8 @@
       borderStyle: 'single',     // single(单线) | double(双线) | threeLine(三线表) | none(无边框)
       borderSize: 6,             // 线宽，单位 1/8 磅（6 ≈ 0.75 磅）
       borderColor: '#000000',
-      bodyFill: '',              // 表格主体底色（空=不改）
+      bodyFill: '#FFFFFF',       // 表格主体底色（需先勾选 bodyFillOn）
+      bodyFillOn: false,         // 是否启用表格主体底色（默认不改动）
       /* —— 行高 / 列宽 / 整体 —— */
       rowHeightEnabled: false,
       rowHeight: 0.8,            // 厘米
@@ -84,7 +86,8 @@
       scale: 100,                // %
       size: 9,                   // 固定磅值
       font: '',                  // 空 = 保留原角标字体
-      color: '',                 // 空 = 保留原角标颜色
+      color: '#000000',          // 角标颜色（需先勾选 colorOn）
+      colorOn: false,            // 是否启用角标颜色（默认保留原色）
       bold: false,               // 角标加粗
       keepBold: true,            // 保留原加粗状态
       manual: ''                 // 手动指定内容：分号/换行分隔，支持 /正则/
@@ -352,7 +355,7 @@
       desc: '顶线/底线较粗、表头下细线、无竖线无内横线；表头加粗居中、表体数字居中，跨页重复表头',
       params: {
         table: {
-          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '',
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFillOn: false, headerFill: '',
           borderEnabled: true, borderStyle: 'threeLine', borderSize: 8, borderColor: '#000000',
           tableAlign: 'center', numberAlign: 'center', repeatHeader: true, fitPage: true,
           applyParagraph: true, align: 'center', lineMode: 'multiple', lineValue: 1.0
@@ -365,7 +368,7 @@
       desc: '全框线单线、四周边框加粗、表头加粗居中并填充浅蓝底色，正文数字居中',
       params: {
         table: {
-          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '#DCE6F1',
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFillOn: true, headerFill: '#DCE6F1',
           borderEnabled: true, borderStyle: 'single', borderSize: 6, borderColor: '#000000',
           tableAlign: 'center', numberAlign: 'center', repeatHeader: true, fitPage: true,
           applyParagraph: true, align: 'center', lineMode: 'multiple', lineValue: 1.0, size: 12
@@ -378,7 +381,7 @@
       desc: '仅上下框线 + 表头下线，无竖线；表头浅灰底加粗，表体左对齐、数字居中',
       params: {
         table: {
-          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFill: '#F2F2F2',
+          enabled: true, headerDetect: 'firstRow', headerBold: true, headerFillOn: true, headerFill: '#F2F2F2',
           borderEnabled: true, borderStyle: 'threeLine', borderSize: 4, borderColor: '#595959',
           tableAlign: 'left', numberAlign: 'center', repeatHeader: true, fitPage: true,
           applyParagraph: true, align: 'left', lineMode: 'multiple', lineValue: 1.15

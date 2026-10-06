@@ -903,10 +903,11 @@
     edges.forEach(function (n) { setBorderEdge(b, 'w:' + n, val, sz, col); });
   }
 
-  /** 表头底色 / 表格整体底色（只改格式，不动数据） */
+  /** 表头底色 / 表格整体底色（只改格式，不动数据）
+   *  注意：底色必须先勾选"启用"才会写入，避免把空白默认值当成黑色刷满全表。 */
   function applyTableShading(rows, t) {
-    var headerFill = String(t.headerFill || '').replace('#', '');
-    var bodyFill = String(t.bodyFill || '').replace('#', '');
+    var headerFill = (t.headerFillOn && t.headerFill) ? hexColor(t.headerFill) : '';
+    var bodyFill = (t.bodyFillOn && t.bodyFill) ? hexColor(t.bodyFill) : '';
     if (!headerFill && !bodyFill) return;
     rows.forEach(function (tr, ri) {
       var isHeader = ri === 0 && t.headerDetect !== 'none';
@@ -935,14 +936,8 @@
     });
   }
 
-  /** 表格宽度适配页宽（超出时按比例缩放列宽，保留合并单元格结构） */
+  /** 表格宽度适配页宽：**只在确实超出页宽时才动**，避免把所有表格都撑成满宽 */
   function fitTableToPage(tbl, tblPr, textWidth) {
-    var w = O.ensureChild(tblPr, 'w:tblW', TBLPR_ORDER);
-    O.attr(w, 'w:w', '5000');
-    O.attr(w, 'w:type', 'pct');
-    var layout = O.ensureChild(tblPr, 'w:tblLayout', TBLPR_ORDER);
-    O.attr(layout, 'w:type', 'autofit');
-
     var grid = O.child(tbl, 'tblGrid');
     if (!grid || !textWidth) return false;
     var cols = O.children(grid, 'gridCol');
@@ -951,7 +946,7 @@
       return parseFloat(c.getAttributeNS(W, 'w') || c.getAttribute('w:w') || 0) || 0;
     });
     var total = widths.reduce(function (a, b) { return a + b; }, 0);
-    if (total <= 0 || total <= textWidth) return false;   // 没超出页宽就不动列宽
+    if (total <= 0 || total <= textWidth) return false;   // 没超出页宽 → 完全不动
 
     var scale = textWidth / total;
     cols.forEach(function (c, i) { O.attr(c, 'w:w', String(Math.round(widths[i] * scale))); });
@@ -974,6 +969,11 @@
         if (tcw && (type === '' || type === 'dxa')) O.attr(tcw, 'w:w', String(Math.round(sum * scale)));
       });
     });
+    var w = O.ensureChild(tblPr, 'w:tblW', TBLPR_ORDER);
+    O.attr(w, 'w:w', String(textWidth));
+    O.attr(w, 'w:type', 'dxa');
+    var layout = O.ensureChild(tblPr, 'w:tblLayout', TBLPR_ORDER);
+    O.attr(layout, 'w:type', 'fixed');
     return true;
   }
 
@@ -1155,7 +1155,7 @@
       O.attr(rf, 'w:ascii', s.font);
       O.attr(rf, 'w:hAnsi', s.font);
     }
-    if (s.color) O.attr(O.ensureChild(rPr, 'w:color'), 'w:val', hexColor(s.color));
+    if (s.colorOn && s.color) O.attr(O.ensureChild(rPr, 'w:color'), 'w:val', hexColor(s.color));
     if (s.bold) {
       O.ensureChild(rPr, 'w:b').removeAttributeNS(W, 'val');
       O.ensureChild(rPr, 'w:bCs').removeAttributeNS(W, 'val');

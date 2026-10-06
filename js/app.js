@@ -106,6 +106,8 @@
       var v = getPath(p, el.dataset.param);
       if (v === undefined || v === null) return;
       if (el.type === 'checkbox') el.checked = !!v;
+      // 颜色控件无法表示"空值"（浏览器会回写成 #000000），所以不能用空值覆盖它
+      else if (el.type === 'color' && v === '') return;
       else el.value = v;
     });
   }

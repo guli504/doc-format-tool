@@ -198,6 +198,7 @@
             <label class="inline"><input type="checkbox" data-param="table.headerBold" data-type="bool"> 表头加粗</label>
             <label class="inline"><input type="checkbox" data-param="table.repeatHeader" data-type="bool"> 跨页时重复表头行（翻页后仍能看到列名）</label>
             <label class="field"><span>表头底色</span><input class="input color" type="color" data-param="table.headerFill" data-type="text"></label>
+            <label class="inline"><input type="checkbox" data-param="table.headerFillOn" data-type="bool"> 启用表头底色（不勾选则不改变原有底色）</label>
           </div>
 
           <div class="subsec"><div class="sub-title">边框 / 线型 / 底色</div>
@@ -217,6 +218,7 @@
               <label class="field"><span>边框颜色</span><input class="input color" type="color" data-param="table.borderColor" data-type="text"></label>
               <label class="field"><span>表格主体底色</span><input class="input color" type="color" data-param="table.bodyFill" data-type="text"></label>
             </div>
+            <label class="inline"><input type="checkbox" data-param="table.bodyFillOn" data-type="bool"> 启用表格主体底色（不勾选则不改变原有底色）</label>
           </div>
 
           <div class="subsec"><div class="sub-title">行高 / 列宽 / 整体</div>
@@ -431,6 +433,7 @@
             <label class="field"><span>角标颜色</span><input class="input color" type="color" data-param="script.color" data-type="text"></label>
           </div>
           <label class="field"><span>角标字体（留空=保留原字体）</span><select class="input" data-param="script.font" data-type="text" data-font-select="any"></select></label>
+          <label class="inline"><input type="checkbox" data-param="script.colorOn" data-type="bool"> 启用角标颜色（不勾选则保留原颜色）</label>
           <label class="inline"><input type="checkbox" data-param="script.keepBold" data-type="bool"> 保留原角标加粗状态</label>
           <label class="inline"><input type="checkbox" data-param="script.bold" data-type="bool"> 角标统一加粗</label>
           <label class="field"><span>手动修正：需要设为上标的内容</span>
