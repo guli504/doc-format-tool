@@ -34,11 +34,33 @@
   /* ============================== 小工具 ============================== */
   function toast(msg, type, ms) {
     var el = $('#toast');
-    el.textContent = msg;
+    el.innerHTML = msg;                       // 允许 <b>、<br> 做要点排版
     el.className = 'toast' + (type ? ' ' + type : '');
     el.hidden = false;
+    void el.offsetWidth;
+    el.classList.add('show');
     clearTimeout(el._t);
-    el._t = setTimeout(function () { el.hidden = true; }, ms || 2600);
+    el._t = setTimeout(function () {
+      el.classList.remove('show');
+      el._t2 = setTimeout(function () { el.hidden = true; }, 260);
+    }, ms || 2600);
+  }
+
+  /** 一键整改的三步进度：解析 → 整改 → 渲染 */
+  var RUN_STEPS = ['parse', 'fix', 'render'];
+  function setStep(name) {
+    var idx = RUN_STEPS.indexOf(name);
+    $$('#runSteps .step').forEach(function (el) {
+      var i = RUN_STEPS.indexOf(el.dataset.step);
+      el.classList.toggle('done', i < idx);
+      el.classList.toggle('active', i === idx);
+    });
+  }
+  function finishSteps() {
+    $$('#runSteps .step').forEach(function (el) { el.classList.add('done'); el.classList.remove('active'); });
+  }
+  function clearSteps() {
+    $$('#runSteps .step').forEach(function (el) { el.classList.remove('done', 'active'); });
   }
 
   function setProgress(pct, text) {
@@ -611,6 +633,8 @@
     Store.saveParams(params);
     var t0 = Date.now();
     setProgress(0, '开始整改…');
+    clearSteps();
+    setStep('parse');
     try {
       for (var i = 0; i < state.files.length; i++) {
         var f = state.files[i];
@@ -618,6 +642,9 @@
         renderFileUI();
         var base = Math.round((i / state.files.length) * 100);
         var res = await Engine.process(f.doc, paramsForFile(f), function (pct, msg) {
+          if (/解析|读取|解压/.test(msg)) setStep('parse');
+          else if (/打包|写入|输出|生成|压缩/.test(msg)) setStep('render');
+          else setStep('fix');
           setProgress(base + Math.round(pct / state.files.length), '[' + f.name + '] ' + msg);
           $('#progressText').textContent = '[' + f.name + '] ' + msg;
         });
@@ -628,14 +655,31 @@
         f.stale = false;
         await sleep(5);
       }
+      finishSteps();
       setProgress(null);
       reRenderAll();
       if (!silent) {
-        var total = state.files.reduce(function (a, f) { return a + (f.report.punctFixed + f.report.spacesFixed + f.report.emptyRemoved); }, 0);
-        toast('整改完成，共处理 ' + total + ' 处，用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒', 'ok', 3200);
+        // 汇总"本次修改了 N 处"，让结果可核对
+        var acc = state.files.reduce(function (a, f) {
+          var q = f.report || {};
+          a.punct += q.punctFixed || 0;
+          a.spaces += q.spacesFixed || 0;
+          a.empty += q.emptyRemoved || 0;
+          a.runs += q.runsSplit || 0;
+          a.head += q.headings || 0;
+          a.tbl += q.tablesStyled || 0;
+          a.script += q.scripts || 0;
+          return a;
+        }, { punct: 0, spaces: 0, empty: 0, runs: 0, head: 0, tbl: 0, script: 0 });
+        var total = acc.punct + acc.spaces + acc.empty + acc.runs;
+        toast('<b>✓ 整改完成 · 本次修改了 ' + total + ' 处</b><br>' +
+          '标点 ' + acc.punct + ' · 空格 ' + acc.spaces + ' · 空行 ' + acc.empty + ' · 文字块调整 ' + acc.runs +
+          '<br>标题 ' + acc.head + ' · 表格 ' + acc.tbl + ' · 角标 ' + acc.script +
+          ' · 用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒', 'ok', 5600);
       }
     } catch (e) {
       console.error(e);
+      clearSteps();
       setProgress(null);
       toast('整改失败：' + e.message, 'err', 5000);
     } finally {
@@ -663,7 +707,9 @@
       '段落 ' + (s.paragraphs || 0) + ' · 标题 ' + (s.headings || 0) + ' · 图片 ' + (s.images || 0) +
       ' · 题注 ' + (s.captions || 0) + ' · 字体 ' + ((s.fontList || []).length) + ' 种';
     $('#issuesBody').innerHTML = findings.map(function (x) {
-      return '<div class="issue ' + (x.level || 'info') + '">' +
+      var first = (x.samples && x.samples.length) ? String(x.samples[0]) : '';
+      return '<div class="issue ' + (x.level || 'info') + '"' +
+        (first ? ' data-locate="' + encodeURIComponent(first) + '" title="点击可在预览中定位"' : '') + '>' +
         '<div class="issue-head">' +
         '<span class="issue-title">' + Render.escapeHtml(x.title) + '</span>' +
         (x.count ? '<span class="issue-count">' + x.count + '</span>' : '') +
@@ -671,7 +717,8 @@
         (x.fix ? '<button class="btn btn-mini issue-more" data-fix="' + x.id + '">修复此项</button>' : '') +
         '</div>' +
         '<div class="issue-detail">' + Render.escapeHtml(x.detail) + '</div>' +
-        (x.samples && x.samples.length ? '<div class="issue-samples">示例：' + x.samples.map(Render.escapeHtml).join(' ｜ ') + '</div>' : '') +
+        (x.samples && x.samples.length ? '<div class="issue-samples">示例：' + x.samples.map(Render.escapeHtml).join(' ｜ ') +
+          (first ? ' <span style="color:var(--brand)">（点击定位）</span>' : '') + '</div>' : '') +
         '</div>';
     }).join('');
     $('#issuesPanel').classList.remove('collapsed');
@@ -1068,10 +1115,17 @@
     /* 问题清单 */
     $('#issuesBody').addEventListener('click', function (e) {
       var b = e.target.closest('[data-fix]');
-      if (!b) return;
-      var n = applyFixes([b.dataset.fix]);
-      toast('已应用该修复项（' + n + ' 项参数）', 'ok');
-      runProcess(true);
+      if (b) {
+        var n = applyFixes([b.dataset.fix]);
+        toast('已应用该修复项（' + n + ' 项参数）', 'ok');
+        runProcess(true);
+        return;
+      }
+      // 点击问题条目 → 在预览里定位到对应内容
+      var item = e.target.closest('[data-locate]');
+      if (!item) return;
+      var ok = locateInPreview(decodeURIComponent(item.dataset.locate || ''));
+      if (!ok) toast('预览里没找到这段内容（可能被其他设置改写了）', null, 2600);
     });
     $('#btnToggleIssues').addEventListener('click', function () {
       $('#issuesPanel').classList.toggle('collapsed');
@@ -1157,6 +1211,147 @@
   }
 
   /* ============================== 启动 ============================== */
+  /* ====================== 界面外壳：面板 / 分类 / 分割线 ====================== */
+  function isNarrow() { return window.innerWidth <= 1180; }
+
+  /** 面板显隐：宽屏是"收起左栏"，窄屏是"抽屉开关" */
+  function setSideVisible(on, save) {
+    if (isNarrow()) {
+      document.body.classList.toggle('side-open', !!on);
+      document.body.classList.remove('side-collapsed');
+    } else {
+      document.body.classList.toggle('side-collapsed', !on);
+      document.body.classList.remove('side-open');
+    }
+    if (save !== false) {
+      var ui = Store.loadUI(); ui.sideOpen = !!on; Store.saveUI(ui);
+    }
+  }
+
+  /** 点击问题清单时，在预览里滚动并高亮对应段落。
+   *  问题样本可能是被截断并加了省略号的，所以依次用"全文 → 逐步缩短的前缀"去匹配。 */
+  function locateInPreview(text) {
+    var raw = String(text || '').replace(/[…]+$/, '').replace(/[.．]{3}$/, '').trim();
+    var base = raw.replace(/\s+/g, '');
+    if (base.length < 2) return false;
+    var tries = [base];
+    [0.75, 0.55, 0.35, 0.2].forEach(function (r) {
+      var n = Math.max(4, Math.floor(base.length * r));
+      var s = base.slice(0, n);
+      if (tries.indexOf(s) < 0) tries.push(s);
+    });
+    var hosts = [$('#hostOriginal'), $('#hostFixed')];
+    for (var t = 0; t < tries.length; t++) {
+      for (var i = 0; i < hosts.length; i++) {
+        var host = hosts[i];
+        if (!host || host.offsetParent === null) continue;   // 隐藏的窗格跳过
+        var nodes = host.querySelectorAll('p, td, th, li');
+        for (var j = 0; j < nodes.length; j++) {
+          var el = nodes[j];
+          if (el.textContent.replace(/\s+/g, '').indexOf(tries[t]) < 0) continue;
+          try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+          catch (err) { el.scrollIntoView(); }
+          el.classList.remove('locate-flash');
+          void el.offsetWidth;
+          el.classList.add('locate-flash');
+          (function (node) {
+            setTimeout(function () { node.classList.remove('locate-flash'); }, 2500);
+          })(el);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function initChrome() {
+    var ui = Store.loadUI();
+
+    // ① 左侧面板显隐（窄屏自动变抽屉）
+    setSideVisible(isNarrow() ? false : (ui.sideOpen !== false), false);
+    var tg = $('#btnSideToggle');
+    if (tg) {
+      tg.addEventListener('click', function () {
+        var open = isNarrow() ? document.body.classList.contains('side-open')
+                              : !document.body.classList.contains('side-collapsed');
+        setSideVisible(!open);
+      });
+    }
+    var mask = $('#drawerMask');
+    if (mask) mask.addEventListener('click', function () { setSideVisible(false); });
+
+    // ② 分类快捷筛选
+    var side = document.querySelector('.side');
+    var bar = $('#catBar');
+    if (bar && side) {
+      var applyCat = function (cat) {
+        side.dataset.filter = cat || 'all';
+        $$('#catBar .cat-chip').forEach(function (c) {
+          c.classList.toggle('active', c.dataset.cat === side.dataset.filter);
+        });
+        var u = Store.loadUI(); u.cat = side.dataset.filter; Store.saveUI(u);
+      };
+      bar.addEventListener('click', function (e) {
+        var c = e.target.closest('.cat-chip');
+        if (!c) return;
+        applyCat(c.dataset.cat);
+        // 切到某分类时，把它下面的卡片展开，省一次点击
+        if (c.dataset.cat !== 'all') {
+          $$('.sec[data-cat="' + c.dataset.cat + '"]').forEach(function (d) { d.open = true; });
+        }
+        $('.side-scroll').scrollTop = 0;
+      });
+      applyCat(ui.cat || 'all');
+    }
+
+    // ③ 左右分割线拖动（分屏对比时）
+    var sp = $('#splitter'), pv = $('#previewBody');
+    if (sp && pv) {
+      var ratio = (typeof ui.split === 'number' && ui.split > 0) ? ui.split : 50;
+      var setRatio = function (v, save) {
+        ratio = Math.max(18, Math.min(82, v));
+        pv.style.setProperty('--split', ratio + '%');
+        if (save) { var u = Store.loadUI(); u.split = Math.round(ratio); Store.saveUI(u); }
+      };
+      setRatio(ratio, false);
+      var dragging = false;
+      var onMove = function (e) {
+        if (!dragging) return;
+        var rect = pv.getBoundingClientRect();
+        var x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+        setRatio((x / rect.width) * 100, false);
+      };
+      var onUp = function () {
+        if (!dragging) return;
+        dragging = false;
+        sp.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        setRatio(ratio, true);
+      };
+      sp.addEventListener('mousedown', function (e) {
+        if (state.view !== 'split') return;
+        dragging = true; sp.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      sp.addEventListener('touchstart', function () { dragging = true; sp.classList.add('dragging'); }, { passive: true });
+      document.addEventListener('touchmove', onMove, { passive: true });
+      document.addEventListener('touchend', onUp);
+      sp.addEventListener('dblclick', function () { setRatio(50, true); });
+    }
+
+    // ④ 窗口尺寸变化：宽屏恢复固定侧栏，窄屏收起抽屉
+    var rt = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(rt);
+      rt = setTimeout(function () {
+        if (!isNarrow()) document.body.classList.remove('side-open');
+      }, 150);
+    });
+  }
+
   function boot() {
     initHeadingBoxes();
     renderTemplates();
@@ -1180,6 +1375,7 @@
     initButtons();
     setView(state.view);
     document.body.dataset.view = state.view;
+    initChrome();
     refreshSectionRules();
     renderPageList();
     updateButtons();

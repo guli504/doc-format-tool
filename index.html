@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文档格式批量整改工具 · 纯本地 · 不上传</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6fed'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23fff' font-family='Microsoft YaHei,sans-serif'%3E%E6%96%87%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=102">
+<link rel="stylesheet" href="css/app.css?v=110">
 </head>
 <body>
 
@@ -19,7 +19,7 @@
     </div>
   </div>
   <div class="top-actions">
-    <span class="badge badge-version" id="verBadge" title="如果这里显示的不是最新版本号，说明浏览器用的是缓存的旧代码，请按 Ctrl+F5 强制刷新">v1.0.2</span>
+    <span class="badge badge-version" id="verBadge" title="如果这里显示的不是最新版本号，说明浏览器用的是缓存的旧代码，请按 Ctrl+F5 强制刷新">v1.1.0</span>
     <span class="badge badge-privacy" title="所有文件仅在本机浏览器中处理，绝不联网上传">🔒 纯本地处理 · 文件不上传</span>
     <button class="btn btn-ghost" id="btnHelp">使用说明</button>
     <button class="btn btn-ghost" id="btnExportCfg" title="把当前参数、模板、字体库导出为 JSON 备份">导出配置</button>
@@ -41,13 +41,27 @@
     </div>
 
     <div class="side-scroll">
+      <!-- 分类快捷筛选 -->
+      <div class="cat-bar" id="catBar">
+        <button class="cat-chip active" data-cat="all">全部</button>
+        <button class="cat-chip" data-cat="font">文字</button>
+        <button class="cat-chip" data-cat="digit">数字</button>
+        <button class="cat-chip" data-cat="para">段落</button>
+        <button class="cat-chip" data-cat="punct">标点</button>
+        <button class="cat-chip" data-cat="caption">图片注释</button>
+        <button class="cat-chip" data-cat="script">角标</button>
+        <button class="cat-chip" data-cat="table">表格</button>
+        <button class="cat-chip" data-cat="page">页面</button>
+        <button class="cat-chip" data-cat="protect">保护与范围</button>
+      </div>
+
 
       <!-- 1. 文档导入 -->
-      <details class="sec" open>
+      <details class="sec" data-cat="doc" open>
         <summary>① 文档导入 <span class="sec-tag" id="tagImport">未选择</span></summary>
         <div class="sec-body">
           <div class="dropzone" id="dropzone">
-            <div class="dz-icon">📄</div>
+            <div class="dz-icon"><svg width="34" height="34" viewBox="0 0 34 34" fill="none"><path d="M8 3h12l6 6v22a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.6"/><path d="M20 3v6h6" stroke="#2563EB" stroke-width="1.6" stroke-linejoin="round"/><path d="M17 17v8m0-8l-3.2 3.2M17 17l3.2 3.2" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <div class="dz-main">把 Word 文档拖到这里</div>
             <div class="dz-sub">或 <button class="link-btn" id="btnPick">点击选择文件</button> ·
               <button class="link-btn" id="btnPickDir">选择文件夹</button> · 支持 .docx / .doc / .rtf，可批量</div>
@@ -57,6 +71,11 @@
           <div class="progress" id="progressWrap" hidden>
             <div class="progress-bar"><i id="progressBar"></i></div>
             <div class="progress-text" id="progressText">准备中…</div>
+          <div class="steps" id="runSteps">
+            <span class="step" data-step="parse"><i>✓</i>解析文档</span>
+            <span class="step" data-step="fix"><i>✓</i>整改排版</span>
+            <span class="step" data-step="render"><i>✓</i>渲染预览</span>
+          </div>
           </div>
           <div class="files" id="fileList"></div>
           <div class="hint" id="importHint"></div>
@@ -64,7 +83,7 @@
       </details>
 
       <!-- 2. 排版模板 -->
-      <details class="sec" open>
+      <details class="sec" data-cat="doc" open>
         <summary>② 排版模板 <span class="sec-tag">5 套内置</span></summary>
         <div class="sec-body">
           <div class="tpl-grid" id="tplGrid"></div>
@@ -77,7 +96,7 @@
       </details>
 
       <!-- 3. 页面设置 -->
-      <details class="sec">
+      <details class="sec" data-cat="page">
         <summary>③ 页面设置（页边距）
           <label class="sw"><input type="checkbox" data-param="page.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -98,7 +117,7 @@
       </details>
 
       <!-- 4. 文字格式 -->
-      <details class="sec" open>
+      <details class="sec" data-cat="font" open>
         <summary>④ 文字格式（中文 / 西文）
           <label class="sw"><input type="checkbox" data-param="body.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -115,7 +134,7 @@
       </details>
 
       <!-- 5. 数字格式 -->
-      <details class="sec">
+      <details class="sec" data-cat="digit">
         <summary>⑤ 数字格式（中英数字分离）
           <label class="sw"><input type="checkbox" data-param="digit.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -161,7 +180,7 @@
       </details>
 
       <!-- 6. 表格格式标准化（表格专项） -->
-      <details class="sec">
+      <details class="sec" data-cat="table">
         <summary>⑥ 表格格式标准化
           <label class="sw"><input type="checkbox" data-param="table.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -276,7 +295,7 @@
       </details>
 
       <!-- 7. 标题层级 -->
-      <details class="sec">
+      <details class="sec" data-cat="font">
         <summary>⑦ 标题层级标准化
           <label class="sw"><input type="checkbox" data-param="headings.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -294,7 +313,7 @@
       </details>
 
       <!-- 8. 段落排版 -->
-      <details class="sec" open>
+      <details class="sec" data-cat="para" open>
         <summary>⑧ 段落排版
           <label class="sw"><input type="checkbox" data-param="paragraph.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -328,7 +347,7 @@
       </details>
 
       <!-- 9. 标点符号 -->
-      <details class="sec">
+      <details class="sec" data-cat="punct">
         <summary>⑨ 标点符号整改
           <label class="sw"><input type="checkbox" data-param="punctuation.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -351,7 +370,7 @@
       </details>
 
       <!-- 10. 空格空行 -->
-      <details class="sec">
+      <details class="sec" data-cat="para">
         <summary>⑩ 空格 / 空行清理
           <label class="sw"><input type="checkbox" data-param="whitespace.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -366,7 +385,7 @@
       </details>
 
       <!-- 11. 图片注释 -->
-      <details class="sec">
+      <details class="sec" data-cat="caption">
         <summary>⑪ 图片 / 表格题注
           <label class="sw"><input type="checkbox" data-param="caption.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -400,7 +419,7 @@
       </details>
 
       <!-- 12. 公式保护 -->
-      <details class="sec">
+      <details class="sec" data-cat="protect">
         <summary>⑫ 公式 / 单位保护
           <label class="sw"><input type="checkbox" data-param="formula.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -411,7 +430,7 @@
       </details>
 
       <!-- 13. 角标（上标 / 下标） -->
-      <details class="sec">
+      <details class="sec" data-cat="script">
         <summary>⑬ 角标（上标 / 下标）
           <label class="sw"><input type="checkbox" data-param="script.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -451,7 +470,7 @@
       </details>
 
       <!-- 14. 整改范围（选择性保护） -->
-      <details class="sec">
+      <details class="sec" data-cat="protect">
         <summary>⑭ 整改范围（选择性保护）
           <label class="sw"><input type="checkbox" data-param="range.enabled" data-type="bool"><span></span></label>
         </summary>
@@ -497,7 +516,7 @@
       </details>
 
       <!-- 15. 处理范围 -->
-      <details class="sec">
+      <details class="sec" data-cat="protect">
         <summary>⑮ 处理范围</summary>
         <div class="sec-body">
           <label class="inline"><input type="checkbox" data-param="scope.tables" data-type="bool"> 表格内文字</label>
@@ -510,7 +529,7 @@
       </details>
 
       <!-- 14. 字体库 -->
-      <details class="sec">
+      <details class="sec" data-cat="font">
         <summary>⑯ 字体自定义库 <span class="sec-tag" id="tagFontCount">0</span></summary>
         <div class="sec-body">
           <div class="row">
@@ -538,6 +557,8 @@
   <!-- ======================= 右侧：文档预览区 ======================= -->
   <section class="main">
     <div class="toolbar">
+      <button class="btn btn-ghost side-toggle" id="btnSideToggle" title="显示 / 隐藏左侧设置面板（窄屏时为抽屉）">☰ 设置</button>
+      <span class="tb-sep"></span>
       <button class="btn btn-primary" id="btnUpload">＋ 导入文档</button>
       <button class="btn btn-go" id="btnRun" disabled>⚡ 一键整改</button>
       <button class="btn" id="btnDetect" disabled>🔍 格式检测</button>
@@ -554,12 +575,15 @@
       </div>
       <label class="zoom">缩放
         <select id="zoomSel">
+          <option value="0.5">50%</option>
           <option value="0.6">60%</option>
           <option value="0.75">75%</option>
           <option value="0.9">90%</option>
           <option value="1" selected>100%</option>
           <option value="1.25">125%</option>
           <option value="1.5">150%</option>
+          <option value="1.75">175%</option>
+          <option value="2">200%</option>
         </select>
       </label>
     </div>
@@ -574,11 +598,12 @@
           <button class="btn btn-mini" id="btnMarkMode" title="打开后在预览里点击任意段落，即可把它标记为“不整改”或取消标记">🖱 点选标记</button>
           <span class="pane-hint" id="markHint"></span>
         </div>
-        <div class="page-host" id="hostOriginal"><div class="empty-state">导入文档后在此显示原文档</div></div>
+        <div class="page-host" id="hostOriginal"><div class="empty-state"><svg class="illus" width="120" height="88" viewBox="0 0 120 88" fill="none" aria-hidden="true"><rect x="30" y="6" width="60" height="76" rx="6" fill="#FFFFFF" stroke="#DBE3EE" stroke-width="1.6"/><rect x="40" y="18" width="40" height="4" rx="2" fill="#C7D2E0"/><rect x="40" y="30" width="40" height="3" rx="1.5" fill="#E4E9F0"/><rect x="40" y="39" width="40" height="3" rx="1.5" fill="#E4E9F0"/><rect x="40" y="48" width="26" height="3" rx="1.5" fill="#E4E9F0"/><rect x="40" y="60" width="20" height="3" rx="1.5" fill="#EFF3F8"/><path d="M20 68l7 7 12-14" stroke="#2563EB" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/><path d="M96 22l6 6 12-14" stroke="#93B4F6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><b>拖入或点击上传 Word 文档</b>支持 .docx / .doc / .rtf，可批量处理<br>全部在本机浏览器内完成，文件不会上传</div></div>
       </div>
+      <div class="splitter" id="splitter" title="拖动调整左右比例"></div>
       <div class="pane" id="paneFixed">
         <div class="pane-label">整改后预览 <span class="pane-hint" id="fixedHint"></span></div>
-        <div class="page-host" id="hostFixed"><div class="empty-state">点击“一键整改”后在此显示整改结果</div></div>
+        <div class="page-host" id="hostFixed"><div class="empty-state"><svg class="illus" width="120" height="88" viewBox="0 0 120 88" fill="none" aria-hidden="true"><rect x="30" y="6" width="60" height="76" rx="6" fill="#FFFFFF" stroke="#C7EEDC" stroke-width="1.6"/><rect x="40" y="18" width="40" height="4" rx="2" fill="#8FD8B8"/><rect x="40" y="30" width="40" height="3" rx="1.5" fill="#DCF3E8"/><rect x="40" y="39" width="40" height="3" rx="1.5" fill="#DCF3E8"/><rect x="40" y="48" width="26" height="3" rx="1.5" fill="#DCF3E8"/><circle cx="90" cy="66" r="15" fill="#059669"/><path d="M83 66l5 5 10-11" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>点击「一键整改」查看结果</b>参数改动会实时联动刷新，所见即所得</div></div>
       </div>
     </div>
 
@@ -595,6 +620,7 @@
     </div>
   </section>
 </main>
+<div class="drawer-mask" id="drawerMask"></div>
 
 <!-- ============================ 使用说明弹层 ============================ -->
 <div class="modal" id="helpModal" hidden>
@@ -604,6 +630,15 @@
       <button class="btn btn-mini" id="btnCloseHelp">关闭</button>
     </div>
     <div class="modal-body">
+      <h3>0. 界面怎么用（v1.1 新版）</h3>
+      <p>
+      <b>分类筛选</b>：左侧顶部一排胶囊按钮（文字 / 数字 / 段落 / 标点 / 图片注释 / 角标 / 表格 / 页面 / 保护与范围）可一键只看某一类设置，点“全部”恢复。<br>
+      <b>面板折叠</b>：工具栏左侧的「☰ 设置」可收起/展开参数面板；窗口变窄时它会自动变成抽屉，点遮罩关闭。<br>
+      <b>分屏对比</b>：分屏时中间有一条<b>分割线</b>，按住左右拖动即可调整左右比例（双击复位 50%）。<br>
+      <b>问题定位</b>：点「格式检测」后，在问题清单里<b>点击任意一条</b>，预览区会自动滚动并高亮对应段落。<br>
+      <b>实时联动</b>：调字体、行距、缩进等参数时右侧预览会立即刷新，不用反复点确认。<br>
+      <b>一键整改</b>：点击后左栏会显示「解析 → 整改 → 渲染」三步进度，完成后提示“本次修改了 N 处”。
+      </p>
       <h3>1. 导入文档</h3>
       <p>把 .docx / .doc / .rtf 文件拖到左侧“文档导入”区域，或点击“点击选择文件”。支持一次选择多个文件批量处理。所有解析都在本机浏览器完成，文件不会上传。</p>
       <h3>2. 选择模板或自定义参数</h3>
@@ -633,13 +668,13 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/vendor/jszip.min.js?v=102"></script>
-<script src="js/constants.js?v=102"></script>
-<script src="js/store.js?v=102"></script>
-<script src="js/ooxml.js?v=102"></script>
-<script src="js/engine.js?v=102"></script>
-<script src="js/render.js?v=102"></script>
-<script src="js/legacy-doc.js?v=102"></script>
-<script src="js/app.js?v=102"></script>
+<script src="js/vendor/jszip.min.js?v=110"></script>
+<script src="js/constants.js?v=110"></script>
+<script src="js/store.js?v=110"></script>
+<script src="js/ooxml.js?v=110"></script>
+<script src="js/engine.js?v=110"></script>
+<script src="js/render.js?v=110"></script>
+<script src="js/legacy-doc.js?v=110"></script>
+<script src="js/app.js?v=110"></script>
 </body>
 </html>
