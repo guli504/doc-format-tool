@@ -267,6 +267,8 @@
     state.busy = true;
     setProgress(0, '准备导入…');
     var total = files.length;
+    var imported = 0;
+    var importFailures = [];
     for (var i = 0; i < total; i++) {
       var f = files[i];
       var pct = Math.round((i / total) * 100);
@@ -296,10 +298,14 @@
         };
         if (st.imageOnly) fobj.status = '⚠ 内容是图片';
         state.files.push(fobj);
+        imported++;
         if (doc.convertNote) toast(doc.convertNote, null, 3600);
       } catch (e) {
         console.error(e);
-        toast('导入失败：' + f.name + ' — ' + e.message, 'err', 4200);
+        importFailures.push({
+          name: f.name,
+          error: e && e.message ? e.message : String(e)
+        });
       }
       await sleep(10);
     }
@@ -312,7 +318,15 @@
       refreshSectionRules();
       scanPages(true);
       renderOriginalPreview();
-      toast('已导入 ' + state.files.length + ' 个文件，点击“一键整改”开始', 'ok');
+    }
+    if (imported || importFailures.length) {
+      var importMessage = importFailures.length
+        ? '<b>导入结束 · 成功 ' + imported + ' 个，失败 ' + importFailures.length + ' 个</b><br>' +
+          importFailures.map(function (f) {
+            return Render.escapeHtml(f.name + '：' + f.error);
+          }).join('<br>')
+        : '本次导入 ' + imported + ' 个文件，点击“一键整改”开始';
+      toast(importMessage, importFailures.length ? 'err' : 'ok', 8000);
     }
     updateImageOnlyHint();
   }
@@ -351,6 +365,9 @@
         '<button class="file-x" data-remove="' + f.id + '" title="移除">✕</button></div>';
     }).join('');
     $('#tagImport').textContent = state.files.length ? state.files.length + ' 个文件' : '未选择';
+    $('#btnRun').textContent = state.files.length > 1
+      ? '⚡ 批量整改（' + state.files.length + '）'
+      : '⚡ 一键整改';
     // 预览区顶部标签
     $('#fileBar').innerHTML = state.files.map(function (f) {
       var cls = f.id === state.activeId ? 'active' : '';
@@ -698,30 +715,53 @@
     setProgress(0, '开始整改…');
     clearSteps();
     setStep('parse');
+    var failed = [];
     try {
       for (var i = 0; i < state.files.length; i++) {
         var f = state.files[i];
         f.status = '整改中';
+        f.error = null;
+        f.blob = null;
+        f.resultXml = null;
+        f.report = null;
         renderFileUI();
         var base = Math.round((i / state.files.length) * 100);
-        var res = await Engine.process(f.doc, paramsForFile(f), function (pct, msg) {
-          if (/解析|读取|解压/.test(msg)) setStep('parse');
-          else if (/打包|写入|输出|生成|压缩/.test(msg)) setStep('render');
-          else setStep('fix');
-          setProgress(base + Math.round(pct / state.files.length), '[' + f.name + '] ' + msg);
-          $('#progressText').textContent = '[' + f.name + '] ' + msg;
-        });
-        f.blob = res.blob;
-        f.resultXml = res.xml;
-        f.report = res.report;
-        f.status = '整改完成';
-        f.stale = false;
+        try {
+          var res = await Engine.process(f.doc, paramsForFile(f), function (pct, msg) {
+            if (/解析|读取|解压/.test(msg)) setStep('parse');
+            else if (/打包|写入|输出|生成|压缩/.test(msg)) setStep('render');
+            else setStep('fix');
+            setProgress(base + Math.round(pct / state.files.length), '[' + f.name + '] ' + msg);
+            $('#progressText').textContent = '[' + f.name + '] ' + msg;
+          });
+          f.blob = res.blob;
+          f.resultXml = res.xml;
+          f.report = res.report;
+          f.status = '整改完成';
+          f.stale = false;
+        } catch (e) {
+          console.error('整改失败：' + f.name, e);
+          f.status = '失败';
+          f.error = e && e.message ? e.message : String(e);
+          failed.push(f);
+          setProgress(Math.round(((i + 1) / state.files.length) * 100),
+            '[' + f.name + '] 整改失败，继续处理下一个文件');
+        }
         await sleep(5);
       }
       finishSteps();
       setProgress(null);
       reRenderAll();
-      if (!silent) {
+      if (failed.length) {
+        var failureDetails = failed.map(function (f) {
+          return Render.escapeHtml(f.name + '：' + f.error);
+        }).join('<br>');
+        var failureSummary = state.files.length > 1
+          ? '<b>批量整改结束 · 成功 ' + (state.files.length - failed.length) +
+            ' 个，失败 ' + failed.length + ' 个</b><br>'
+          : '<b>整改失败</b><br>';
+        toast(failureSummary + failureDetails, 'err', 8000);
+      } else if (!silent) {
         // 汇总"本次修改了 N 处"，让结果可核对
         var acc = state.files.reduce(function (a, f) {
           var q = f.report || {};
@@ -816,9 +856,18 @@
     }
     toast('正在打包 ' + done.length + ' 个文件…');
     var zip = new JSZip();
+    var usedNames = Object.create(null);
     var jobs = done.map(function (f) {
       return f.blob.arrayBuffer().then(function (b) {
-        zip.file(basename(f.name) + '_已整改.docx', b);
+        var base = basename(f.name) + '_已整改';
+        var filename = base + '.docx';
+        var suffix = 2;
+        while (usedNames[filename]) {
+          filename = base + ' (' + suffix + ').docx';
+          suffix++;
+        }
+        usedNames[filename] = true;
+        zip.file(filename, b);
       });
     });
     Promise.all(jobs).then(function () {
