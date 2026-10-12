@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>引擎自动化测试</title>
+<style>body{font-family:Consolas,monospace;font-size:12px}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+<pre id="out">运行中…</pre>
+<script src="../js/vendor/jszip.min.js"></script>
+<script src="../js/constants.js"></script>
+<script src="../js/knowledge.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/ooxml.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/legacy-doc.js"></script>
+<script>
+(function () {
+  var log = [], failed = 0;
+  function out(s) { log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+  function check(name, cond, extra) {
+    if (!cond) failed++;
+    out((cond ? '  [PASS] ' : '  [FAIL] ') + name + (extra !== undefined ? '  -> ' + extra : ''));
+  }
+  function texts(xmlDoc) {
+    var ps = xmlDoc.getElementsByTagNameNS(Ooxml.NS.w, 'p'), arr = [];
+    for (var i = 0; i < ps.length; i++) arr.push(Ooxml.paraText(ps[i], false));
+    return arr;
+  }
+  function runsOf(xmlDoc) {
+    return xmlDoc.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+  }
+  function fontsOf(xmlDoc) {
+    var set = {}, rs = runsOf(xmlDoc);
+    for (var i = 0; i < rs.length; i++) {
+      var rPr = Ooxml.getRPr(rs[i]); if (!rPr) continue;
+      var rf = Ooxml.child(rPr, 'rFonts'); if (!rf) continue;
+      var k = (rf.getAttributeNS(Ooxml.NS.w, 'eastAsia') || '') + '|' + (rf.getAttributeNS(Ooxml.NS.w, 'ascii') || '');
+      set[k] = (set[k] || 0) + 1;
+    }
+    return set;
+  }
+  function httpGet(url) {
+    return new Promise(function (res, rej) {
+      var x = new XMLHttpRequest();
+      x.open('GET', url, true);
+      x.responseType = 'arraybuffer';
+      x.onload = function () { res(x.response); };
+      x.onerror = function () { rej(new Error('网络/文件读取失败: ' + url)); };
+      x.send();
+    });
+  }
+
+  (async function () {
+    try {
+      out('== 1. 打开原始文档 ==');
+      var buf = await httpGet('sample.docx');
+      check('读取 sample.docx', buf && buf.byteLength > 1000, buf.byteLength + ' 字节');
+      var doc = await Ooxml.open(buf, 'sample.docx');
+      check('段落数 > 10', doc.stats.paragraphs > 10, doc.stats.paragraphs);
+      check('识别到图片关系', doc.stats.images >= 1, doc.stats.images);
+      check('样式表已解析', Object.keys(doc.styles).length > 3, Object.keys(doc.styles).join(','));
+
+      var before = texts(doc.xml);
+      out('  原文段落示例: ' + JSON.stringify(before.slice(1, 4)));
+
+      out('== 2. 问题检测（analyze） ==');
+      var an = Engine.analyze(doc, DFT.DEFAULT_PARAMS);
+      check('发现排版问题', an.findings.length > 3, an.findings.map(function (f) { return f.id; }).join(','));
+      out('  ' + an.findings.map(function (f) { return f.id + '(' + f.count + ')'; }).join(' '));
+
+      out('== 3. 一键整改（process） ==');
+      var params = Store.merge(DFT.DEFAULT_PARAMS, DFT.TEMPLATES[1].params); // 大学论文模板
+      var t0 = Date.now();
+      var res = await Engine.process(doc, params);
+      check('生成新 docx blob', res.blob && res.blob.size > 1000, res.blob.size + ' 字节, ' + (Date.now() - t0) + 'ms');
+      out('  统计: ' + JSON.stringify(res.report));
+
+      out('== 4. 校验输出文档 ==');
+      var buf2 = await res.blob.arrayBuffer();
+      var doc2 = await Ooxml.open(buf2, 'out.docx');
+      var after = texts(doc2.xml);
+      check('输出可被重新解析', doc2.stats.paragraphs > 0, doc2.stats.paragraphs);
+      check('图片未丢失', doc2.stats.images >= 1, doc2.stats.images);
+      check('表格未丢失', doc2.stats.tables >= 1, doc2.stats.tables);
+      check('空行已删除', after.length < before.length, before.length + ' -> ' + after.length);
+
+      // 标点整改
+      var joined = after.join('\n');
+      check('半角逗号转中文', joined.indexOf('研究，内容') >= 0 || joined.indexOf('研究,内容') < 0, '有');
+      check('小数点被保护(3.14)', joined.indexOf('3.14') >= 0 || joined.indexOf('3。14') < 0);
+      check('千分位被保护(1,000)', joined.indexOf('1,000') >= 0);
+      check('时间被保护(12:30)', joined.indexOf('12:30') >= 0 || joined.indexOf('12：30') >= 0);
+      check('乱码字符已清除', joined.indexOf('\uFFFD') < 0 && joined.indexOf('\u200B') < 0);
+      check('重复标点已合并', joined.indexOf('！！！') < 0 && joined.indexOf('。。。') < 0);
+      check('全角数字转半角', joined.indexOf('１２３４５') < 0 && joined.indexOf('12345') >= 0);
+      check('全角空格已清理', joined.indexOf('\u3000') < 0);
+
+      // 字体分离
+      var fset = fontsOf(doc2.xml);
+      out('  字体组合: ' + JSON.stringify(fset));
+      check('出现中文字体(宋体/黑体等)', Object.keys(fset).some(function (k) { return /宋体|黑体|楷体|仿宋|微软雅黑/.test(k); }));
+      check('出现西文/数字字体(Times New Roman)', Object.keys(fset).some(function (k) { return /Times New Roman/.test(k); }));
+
+      // 段落属性
+      var sects = doc2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'sectPr');
+      var pgMar = Ooxml.child(sects[0], 'pgMar');
+      var leftCm = parseInt(pgMar.getAttributeNS(Ooxml.NS.w, 'left'), 10) / 567;
+      check('页边距已应用(左 3.17cm)', Math.abs(leftCm - 3.17) < 0.05, leftCm.toFixed(2) + 'cm');
+
+      var indentCount = 0, jcCount = 0, spacingCount = 0, headingStyled = 0;
+      var ps2 = doc2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      for (var i = 0; i < ps2.length; i++) {
+        var pPr = Ooxml.getPPr(ps2[i]); if (!pPr) continue;
+        var ind = Ooxml.child(pPr, 'ind');
+        if (ind && (ind.getAttributeNS(Ooxml.NS.w, 'firstLineChars') === '200' ||
+                    ind.getAttributeNS(Ooxml.NS.w, 'firstLine') === '480')) indentCount++;
+        if (Ooxml.child(pPr, 'jc')) jcCount++;
+        if (Ooxml.child(pPr, 'spacing')) spacingCount++;
+      }
+      check('存在首行缩进 2 字符的段落', indentCount > 3, indentCount + ' 段');
+      check('存在对齐设置', jcCount > 3, jcCount + ' 段');
+      check('存在行距设置', spacingCount > 3, spacingCount + ' 段');
+
+      // OOXML 结构合法性：w:pPr 必须是段落第一个子元素，w:rPr 必须是 run 第一个子元素
+      var badP = 0, badR = 0;
+      var allP = doc2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      for (var ip = 0; ip < allP.length; ip++) {
+        var pPr2 = Ooxml.getPPr(allP[ip]);
+        if (pPr2 && allP[ip].firstElementChild !== pPr2) badP++;
+      }
+      var allR = doc2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+      for (var ir = 0; ir < allR.length; ir++) {
+        var rPr2 = Ooxml.getRPr(allR[ir]);
+        if (rPr2 && allR[ir].firstElementChild !== rPr2) badR++;
+      }
+      check('w:pPr 位置合法', badP === 0, badP + ' 处异常');
+      check('w:rPr 位置合法', badR === 0, badR + ' 处异常');
+
+      // rPr 子元素架构顺序合法性（w:rFonts 必须在 w:b / w:color / w:sz 之前）
+      var order = Ooxml.RPR_ORDER, badOrder = 0;
+      for (var io = 0; io < allR.length; io++) {
+        var rp = Ooxml.getRPr(allR[io]); if (!rp) continue;
+        var lastIdx = -1;
+        for (var ic = 0; ic < rp.childNodes.length; ic++) {
+          var cn = rp.childNodes[ic]; if (cn.nodeType !== 1) continue;
+          var qi = order.indexOf('w:' + Ooxml.localName(cn));
+          if (qi < 0) continue;
+          if (qi < lastIdx) { badOrder++; break; }
+          lastIdx = qi;
+        }
+      }
+      check('w:rPr 子元素顺序合法', badOrder === 0, badOrder + ' 处异常');
+
+      // 标题识别
+      var h = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '一、研究现状', 0, params);
+      check('汉字式编号识别为标题', h === 1, 'level=' + h);
+      var h2 = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '1.2 技术路线', 0, DFT.DEFAULT_PARAMS);
+      check('章节式编号 1.2 → 二级', h2 === 2, 'level=' + h2);
+      var h2b = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '1.1.1 详细设计', 0, DFT.DEFAULT_PARAMS);
+      check('章节式编号 1.1.1 → 三级', h2b === 3, 'level=' + h2b);
+      var h2c = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '第一章 绪论', 0, DFT.DEFAULT_PARAMS);
+      check('第X章 → 一级', h2c === 1, 'level=' + h2c);
+      var h3 = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '这是一段普通正文内容，不应被识别为标题。', 0, DFT.DEFAULT_PARAMS);
+      check('普通正文不识别为标题', h3 === 0, 'level=' + h3);
+      // 小数不被误判为标题编号（表格数据行常见）
+      ['2.85', '3.14', '68%', '2022', '1,000'].forEach(function (txt) {
+        var lv = Engine._internals.detectHeadingLevel(
+          doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], txt, 0, DFT.DEFAULT_PARAMS);
+        check('数据「' + txt + '」不识别为标题', lv === 0, 'level=' + lv);
+      });
+      check('「3.14 是圆周率」不被误判为标题',
+        Engine._internals.detectHeadingLevel(doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '3.14 是圆周率', 0, DFT.DEFAULT_PARAMS) === 0);
+      check('「2.85 亿元」不被误判为标题',
+        Engine._internals.detectHeadingLevel(doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '2.85 亿元', 0, DFT.DEFAULT_PARAMS) === 0);
+      check('「1.1 研究背景」仍识别为二级',
+        Engine._internals.detectHeadingLevel(doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '1.1 研究背景', 0, DFT.DEFAULT_PARAMS) === 2);
+      check('「1. 研究方法」仍识别为一级',
+        Engine._internals.detectHeadingLevel(doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '1. 研究方法', 0, DFT.DEFAULT_PARAMS) === 1);
+
+      // 公式/单位保护
+      var guard = Engine._internals.detectHeadingLevel(
+        doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p')[0], '温度 ≤ 25℃', 0, DFT.DEFAULT_PARAMS);
+      check('含单位符号的短句不误判标题', guard === 0);
+
+      out('== 5. 预览渲染 ==');
+      var r1 = Render.render(doc, doc.xml, {});
+      var r2 = Render.render(doc2, doc2.xml, {});
+      check('原文预览生成', r1.html.length > 300, r1.html.length);
+      check('整改后预览生成', r2.html.length > 300, r2.html.length);
+      check('预览含图片', r2.html.indexOf('data:image/png;base64') >= 0);
+      check('预览含表格', r2.html.indexOf('<table') >= 0);
+      check('页面尺寸合理', r2.page.w > 15 && r2.page.h > 20, JSON.stringify(r2.page));
+
+      out('== 6. 幂等性：重复处理不叠加 ==');
+      var res2 = await Engine.process(doc, params);
+      var buf3 = await res2.blob.arrayBuffer();
+      var doc3 = await Ooxml.open(buf3, 'out2.docx');
+      var after2 = texts(doc3.xml);
+      check('两次处理结果一致', JSON.stringify(after2) === JSON.stringify(after),
+        after2.length + ' vs ' + after.length);
+
+      out('== 7. 旧格式解析 ==');
+      check('docx 探测', LegacyDoc.detect(buf) === 'docx');
+
+      // GBK 转义的 RTF
+      var rtfGbk = await httpGet('sample-rtf-gbk.rtf');
+      check('RTF(GBK) 探测', LegacyDoc.detect(rtfGbk) === 'rtf');
+      var docR1 = await LegacyDoc.convert(rtfGbk, 't1.rtf');
+      var rtfParas1 = texts(docR1.xml);
+      out('  RTF(GBK) 段落: ' + JSON.stringify(rtfParas1));
+      check('RTF(GBK) 中文正确解码', rtfParas1.join('|').indexOf('这是一个测试文件') >= 0, rtfParas1.join('|'));
+      check('RTF 多段落拆分', rtfParas1.length === 2, rtfParas1.length);
+
+      // 原始 UTF-8 的 RTF
+      var rtfUtf = await httpGet('sample-rtf-utf8.rtf');
+      var docR2 = await LegacyDoc.convert(rtfUtf, 't2.rtf');
+      var rtfParas2 = texts(docR2.xml);
+      check('RTF(UTF8) 中文正确解码', rtfParas2.join('|').indexOf('这是一个测试文件') >= 0, rtfParas2.join('|'));
+      check('RTF 忽略 \\* 目标组', rtfParas2.join('|').indexOf('generator') < 0, rtfParas2.join('|'));
+
+      // 对转换出来的文档跑一遍完整整改
+      var resR = await Engine.process(docR1, DFT.DEFAULT_PARAMS);
+      var docR3 = await Ooxml.open(await resR.blob.arrayBuffer(), 'r.docx');
+      check('转换文档可被整改并导出', texts(docR3.xml).join('').indexOf('第二段内容') >= 0);
+
+      out('== 8. 旧版 .doc 二进制解析 ==');
+      var docBuf = await httpGet('sample-legacy.doc');
+      check('.doc 探测为 OLE', LegacyDoc.detect(docBuf) === 'ole', LegacyDoc.detect(docBuf));
+      var legDoc = await LegacyDoc.convert(docBuf, 'sample-legacy.doc');
+      var legParas = texts(legDoc.xml);
+      out('  .doc 段落: ' + JSON.stringify(legParas));
+      var legJoined = legParas.join('\n');
+      check('.doc 中文正文提取', legJoined.indexOf('这是正文,包含数字 3.14 与百分号 68%。') >= 0);
+      check('.doc 段落符拆分正确', legParas.length === 6, legParas.length);
+      check('.doc 单元格符转制表符', legJoined.indexOf('表内文本') >= 0);
+      check('.doc 图片占位符', legJoined.indexOf('[图片]图1示意图') >= 0);
+      check('.doc 域指令被剔除', legJoined.indexOf('HYPERLINK') < 0 && legJoined.indexOf('显示文本') >= 0);
+      var resLeg = await Engine.process(legDoc, Store.merge(DFT.DEFAULT_PARAMS, DFT.TEMPLATES[0].params));
+      var legOut = await Ooxml.open(await resLeg.blob.arrayBuffer(), 'leg.docx');
+      var legOutTexts = texts(legOut.xml);
+      out('  .doc 整改后: ' + JSON.stringify(legOutTexts));
+      check('.doc 整改后标点已转中文', legOutTexts.join('').indexOf('这是正文，包含数字') >= 0);
+      check('.doc 整改后可直接导出 docx', resLeg.blob.size > 2000, resLeg.blob.size);
+
+      out('== 9. 表格文字独立格式 ==');
+      check('检测到表格数量', an.stats.tables >= 1, an.stats.tables);
+      check('统计到表格内段落', an.stats.tableParas > 0, an.stats.tableParas);
+      check('问题清单含表格建议', an.findings.some(function (f) { return f.id === 'table_font'; }));
+
+      function collectTableRuns(d) {
+        var out2 = [], tbls = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl');
+        for (var ti = 0; ti < tbls.length; ti++) {
+          var rows = Ooxml.children(tbls[ti], 'tr');
+          for (var ri = 0; ri < rows.length; ri++) {
+            var cells = Ooxml.children(rows[ri], 'tc');
+            for (var ci = 0; ci < cells.length; ci++) {
+              var ps = cells[ci].getElementsByTagNameNS(Ooxml.NS.w, 'p');
+              for (var pi = 0; pi < ps.length; pi++) {
+                var rs = ps[pi].getElementsByTagNameNS(Ooxml.NS.w, 'r');
+                for (var rj = 0; rj < rs.length; rj++) {
+                  var rPr = Ooxml.getRPr(rs[rj]); if (!rPr) continue;
+                  var rf = Ooxml.child(rPr, 'rFonts'), sz = Ooxml.child(rPr, 'sz');
+                  var b = Ooxml.child(rPr, 'b'), col = Ooxml.child(rPr, 'color');
+                  var bv = b ? Ooxml.wval(b) : null;
+                  out2.push({
+                    row: ri,
+                    text: rs[rj].textContent,
+                    cn: rf ? (rf.getAttributeNS(Ooxml.NS.w, 'eastAsia') || '') : '',
+                    en: rf ? (rf.getAttributeNS(Ooxml.NS.w, 'ascii') || '') : '',
+                    sz: sz ? Ooxml.wval(sz) : '',
+                    color: col ? Ooxml.wval(col) : '',
+                    bold: b ? !(bv === '0' || bv === 'false') : false
+                  });
+                }
+              }
+            }
+          }
+        }
+        return out2;
+      }
+      function fontHistogram(d) {
+        var h = {}, rs = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+        for (var i = 0; i < rs.length; i++) {
+          var rPr = Ooxml.getRPr(rs[i]); if (!rPr) continue;
+          var rf = Ooxml.child(rPr, 'rFonts'); if (!rf) continue;
+          var f = rf.getAttributeNS(Ooxml.NS.w, 'eastAsia') || '';
+          if (f) h[f] = (h[f] || 0) + 1;
+        }
+        return h;
+      }
+
+      var tParams = Store.merge(DFT.DEFAULT_PARAMS, {
+        table: { enabled: true, cnFont: '黑体', latinFont: 'Arial', size: 9, sizeFollow: false, bold: false,
+                 color: '#C00000', headerBold: true, applyParagraph: false }
+      });
+      var resT = await Engine.process(doc, tParams);
+      var docT = await Ooxml.open(await resT.blob.arrayBuffer(), 'table.docx');
+      var tRuns = collectTableRuns(docT);
+      out('  表格 run 数=' + tRuns.length + '  示例=' + JSON.stringify(tRuns[0]));
+      check('表格内文字已用表格中文字体(黑体)', tRuns.length > 0 && tRuns.every(function (r) { return r.cn === '黑体'; }),
+        tRuns[0] && tRuns[0].cn);
+      // 表格里的数字走「数字格式 → 表格数字」，中文字符走「表格文字格式」，两者分别断言
+      function isDigitRun(r) { return /\d/.test(r.text || ''); }
+      var cjkRuns = tRuns.filter(function (r) { return !isDigitRun(r); });
+      var digRuns = tRuns.filter(isDigitRun);
+      check('表格中文：9 磅 + 红色 C00000',
+        cjkRuns.length > 0 && cjkRuns.every(function (r) { return r.sz === '18' && r.color === 'C00000'; }),
+        JSON.stringify(cjkRuns.slice(0, 3)));
+      check('表格数字：字体走"表格数字"、字号默认跟随表格',
+        digRuns.length > 0 && digRuns.every(function (r) { return r.en === 'Times New Roman' && r.sz === '18'; }),
+        JSON.stringify(digRuns.slice(0, 3)));
+      var resDigInd = await Engine.process(doc, Store.merge(tParams, {
+        digit: { table: { independent: true, size: 10.5 } }
+      }));
+      var docDigInd = await Ooxml.open(await resDigInd.blob.arrayBuffer(), 'digind.docx');
+      var digInd = collectTableRuns(docDigInd).filter(function (r) { return /\d/.test(r.text); });
+      check('勾选"独立设置数字字号"后，表格数字按专属字号(10.5磅=21)',
+        digInd.length > 0 && digInd.every(function (r) { return r.sz === '21'; }), JSON.stringify(digInd.slice(0, 3)));
+      var hdr = tRuns.filter(function (r) { return r.row === 0; });
+      var bodyT = tRuns.filter(function (r) { return r.row > 0; });
+      check('表头行已自动加粗', hdr.length > 0 && hdr.every(function (r) { return r.bold; }), hdr.length + ' 个 run');
+      check('非表头行未被加粗', bodyT.length > 0 && bodyT.every(function (r) { return !r.bold; }), bodyT.length + ' 个 run');
+      var hist = fontHistogram(docT);
+      out('  全文中文字体分布=' + JSON.stringify(hist));
+      check('正文未被表格字体影响(仍有宋体)', (hist['宋体'] || 0) > 0, JSON.stringify(hist));
+      check('正文标题仍用黑体、表格也用黑体', (hist['黑体'] || 0) > 0);
+      check('报告统计表格段落数', resT.report.tableParas > 0, resT.report.tableParas);
+
+      // 表格段落版式（行距/对齐）默认不动，开启后才统一
+      var tblP = docT.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl')[0]
+        .getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      var spacingOn = 0;
+      for (var q = 0; q < tblP.length; q++) {
+        var pp = Ooxml.getPPr(tblP[q]);
+        if (pp && Ooxml.child(pp, 'spacing')) spacingOn++;
+      }
+      check('默认不改动表格行距', spacingOn < tblP.length, spacingOn + '/' + tblP.length);
+
+      var resT2 = await Engine.process(doc, Store.merge(tParams, {
+        table: { applyParagraph: true, lineMode: 'multiple', lineValue: 1.0, align: 'center' }
+      }));
+      var docT2 = await Ooxml.open(await resT2.blob.arrayBuffer(), 'table2.docx');
+      var tbl2 = docT2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl')[0];
+      var ps2 = tbl2.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      var sp2 = 0, jc2 = 0;
+      for (var q2 = 0; q2 < ps2.length; q2++) {
+        var pp2 = Ooxml.getPPr(ps2[q2]);
+        if (pp2 && Ooxml.child(pp2, 'spacing')) sp2++;
+        if (pp2 && Ooxml.child(pp2, 'jc')) jc2++;
+      }
+      check('开启后表格行距已统一', sp2 >= ps2.length - 1, sp2 + '/' + ps2.length);
+      check('开启后表格对齐已统一', jc2 >= ps2.length - 1, jc2 + '/' + ps2.length);
+
+      // 关闭开关时表格跟随正文
+      var resT3 = await Engine.process(doc, DFT.DEFAULT_PARAMS);
+      var docT3 = await Ooxml.open(await resT3.blob.arrayBuffer(), 'table3.docx');
+      var tRuns3 = collectTableRuns(docT3);
+      check('关闭时表格跟随正文(宋体/Times)', tRuns3.length > 0 &&
+        tRuns3.every(function (r) { return r.cn === '宋体' && r.en === 'Times New Roman'; }),
+        JSON.stringify(tRuns3.filter(function (r) { return !(r.cn === '宋体' && r.en === 'Times New Roman'); }).slice(0, 3)));
+
+      /* ---------------- 公共辅助 ---------------- */
+      function findByText(d, needle) {
+        var ps = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+        for (var i = 0; i < ps.length; i++) {
+          if (Ooxml.paraText(ps[i], false).indexOf(needle) >= 0) return ps[i];
+        }
+        return null;
+      }
+      function runInfo(run) {
+        var rPr = Ooxml.getRPr(run); if (!rPr) return null;
+        var va = Ooxml.child(rPr, 'vertAlign'), sz = Ooxml.child(rPr, 'sz');
+        return { text: run.textContent, va: va ? Ooxml.wval(va) : '', sz: sz ? Ooxml.wval(sz) : '' };
+      }
+      function runsInfo(el) {
+        var out3 = [], rs = el.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+        for (var i = 0; i < rs.length; i++) { var o = runInfo(rs[i]); if (o) out3.push(o); }
+        return out3;
+      }
+      function paraXml(d, needle) {
+        var p = findByText(d, needle);
+        if (!p) return null;
+        return new XMLSerializer().serializeToString(p).replace(/ xmlns:[a-zA-Z0-9]+="[^"]*"/g, '');
+      }
+      function cellTextsT(d) {
+        var out4 = [], tbls = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl');
+        for (var i = 0; i < tbls.length; i++) {
+          var rows = Ooxml.children(tbls[i], 'tr');
+          for (var r = 0; r < rows.length; r++) {
+            Ooxml.children(rows[r], 'tc').forEach(function (tc) {
+              out4.push(Ooxml.children(tc, 'p').map(function (p) { return Ooxml.paraText(p, false); }).join(' '));
+            });
+          }
+        }
+        return out4;
+      }
+
+      out('== 10. 角标（上标 / 下标）智能识别 ==');
+      var resSc = await Engine.process(doc, DFT.DEFAULT_PARAMS);
+      var docSc = await Ooxml.open(await resSc.blob.arrayBuffer(), 'script.docx');
+      check('角标被识别并处理', resSc.report.scripts >= 4, 'scripts=' + resSc.report.scripts);
+      var pChem = findByText(docSc, '水的化学式');
+      var chemRuns = runsInfo(pChem);
+      out('  化学式段落: ' + JSON.stringify(chemRuns.map(function (r) { return r.text + ':' + r.va + ':' + r.sz; })));
+      var subRun = chemRuns.filter(function (r) { return r.text === '2' && r.va === 'subscript'; })[0];
+      var supRun = chemRuns.filter(function (r) { return r.text === '2' && r.va === 'superscript'; })[0];
+      check('真下标被识别并保留', !!subRun, JSON.stringify(subRun));
+      check('真上标被识别并保留', !!supRun, JSON.stringify(supRun));
+      check('角标字号统一为所在段落正文(12磅=24)', !!subRun && subRun.sz === '24' && !!supRun && supRun.sz === '24',
+        (subRun && subRun.sz) + '/' + (supRun && supRun.sz));
+      check('角标内容未被改动（[1] 保持原样且仍是上标）',
+        chemRuns.some(function (r) { return r.text === '[1]' && r.va === 'superscript'; }));
+      var fakeRuns = runsInfo(findByText(docSc, '未标记的幂次'));
+      var fixed = fakeRuns.filter(function (r) { return r.text === '2'; })[0];
+      check('假角标（小字号未标记）被智能修正为真上标', !!fixed && fixed.va === 'superscript' && fixed.sz === '24',
+        JSON.stringify(fixed));
+      var manRuns = runsInfo(findByText(docSc, '手动修正测试'));
+      check('默认未手动指定时 [2] 保持正文（不被误判为角标）',
+        manRuns.length > 0 && manRuns.every(function (r) { return r.va === ''; }),
+        JSON.stringify(manRuns));
+      var resM = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, { script: { manual: '[2]' } }));
+      var docM = await Ooxml.open(await resM.blob.arrayBuffer(), 'm.docx');
+      check('手动指定的 [2] 被设为上标',
+        runsInfo(findByText(docM, '手动修正测试')).some(function (r) { return r.text === '[2]' && r.va === 'superscript'; }));
+      var resP = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, { script: { mode: 'preserve' } }));
+      var docP = await Ooxml.open(await resP.blob.arrayBuffer(), 'p.docx');
+      var c2 = runsInfo(findByText(docP, '水的化学式'));
+      check('preserve 模式完全保留原角标字号(10.5磅=21)',
+        c2.some(function (r) { return r.va === 'subscript' && r.sz === '21'; }),
+        JSON.stringify(c2.map(function (r) { return r.text + ':' + r.va + ':' + r.sz; })));
+      var tblSup = docSc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl')[0];
+      check('表格内的角标同样被识别', runsInfo(tblSup).some(function (r) { return r.va === 'superscript'; }));
+      check('角标未被标点整改破坏', (function () {
+        var t = Ooxml.paraText(pChem, false);
+        return t.indexOf('H') >= 0 && t.indexOf('O') >= 0;
+      })());
+
+      out('== 11. 整改范围（选择性保护，防误改） ==');
+      var beforeCover = paraXml(doc, '题目：企业数字化转型研究');
+      var beforeToc = paraXml(doc, '第一章 项目背景\t1');
+      var beforeBody = paraXml(doc, '这是使用标题样式的段落');
+      var resRg = await Engine.process(doc, DFT.DEFAULT_PARAMS);
+      var docRg = await Ooxml.open(await resRg.blob.arrayBuffer(), 'range.docx');
+      check('统计到被跳过的段落', resRg.report.skippedParas > 0, resRg.report.skippedParas);
+      check('跳过原因含封面与目录', !!resRg.report.skipReasons.cover && !!resRg.report.skipReasons.toc,
+        JSON.stringify(resRg.report.skipReasons));
+      check('封面页完全未被修改', paraXml(docRg, '题目：企业数字化转型研究') === beforeCover);
+      check('目录页完全未被修改', paraXml(docRg, '第一章 项目背景\t1') === beforeToc);
+      check('正文仍被正常整改', paraXml(docRg, '这是使用标题样式的段落') !== beforeBody);
+      check('识别到文档分页数', resRg.report.pagesCount >= 3, resRg.report.pagesCount);
+
+      var resRef = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, { range: { protectRefs: true } }));
+      var docRef = await Ooxml.open(await resRef.blob.arrayBuffer(), 'ref.docx');
+      check('参考文献页被豁免（原文照旧）',
+        paraXml(docRef, '[1] 张三.数字化转型研究,2023:15-20.') === paraXml(doc, '[1] 张三.数字化转型研究,2023:15-20.'));
+
+      var resPg = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        range: { mode: 'pages', pages: '2', protectCover: false, protectToc: false }
+      }));
+      var docPg = await Ooxml.open(await resPg.blob.arrayBuffer(), 'pg.docx');
+      check('指定页模式：指定页被整改', paraXml(docPg, '第一章 项目背景\t1') !== beforeToc);
+      check('指定页模式：其他页完全未改', paraXml(docPg, '这是使用标题样式的段落') === beforeBody);
+
+      var resSec = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        range: { sectionRules: { '1': { enabled: false } }, protectCover: false, protectToc: false }
+      }));
+      var docSec = await Ooxml.open(await resSec.blob.arrayBuffer(), 'sec.docx');
+      check('整节排除：段落全部未改', paraXml(docSec, '这是使用标题样式的段落') === beforeBody &&
+        paraXml(docSec, '题目：企业数字化转型研究') === beforeCover);
+      var marSec = Ooxml.child(docSec.xml.getElementsByTagNameNS(Ooxml.NS.w, 'sectPr')[0], 'pgMar');
+      check('整节排除：页边距也未改（仍为 2.0cm）',
+        Math.abs(parseInt(marSec.getAttributeNS(Ooxml.NS.w, 'left'), 10) / 567 - 2.0) < 0.02,
+        (parseInt(marSec.getAttributeNS(Ooxml.NS.w, 'left'), 10) / 567).toFixed(2) + 'cm');
+
+      out('== 12. 表格专项格式化（边框 / 三线表 / 表头 / 行高 / 数字对齐 / 适配页宽） ==');
+      var dataBefore = cellTextsT(doc);
+      var tblP2 = Store.merge(DFT.DEFAULT_PARAMS, {
+        table: {
+          enabled: true, borderEnabled: true, borderStyle: 'threeLine', borderSize: 8, borderColor: '#000000',
+          headerBold: true, headerDetect: 'firstRow', headerFillOn: true, headerFill: '#DCE6F1',
+          rowHeightEnabled: true, rowHeight: 1.0, rowHeightRule: 'atLeast',
+          tableAlign: 'center', numberAlign: 'center', repeatHeader: true, fitPage: true,
+          applyParagraph: true, align: 'center', size: 10.5
+        }
+      });
+      var resT3 = await Engine.process(doc, tblP2);
+      var docT4 = await Ooxml.open(await resT3.blob.arrayBuffer(), 'tbl3.docx');
+      var T = docT4.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl')[0];
+      var TPr = Ooxml.child(T, 'tblPr');
+      var jcT = TPr ? Ooxml.child(TPr, 'jc') : null;
+      check('表格整体居中', jcT && Ooxml.wval(jcT) === 'center', jcT ? Ooxml.wval(jcT) : 'none');
+      var tb = TPr ? Ooxml.child(TPr, 'tblBorders') : null;
+      function edgeVal(name) {
+        var e = tb ? Ooxml.child(tb, name) : null;
+        return e ? { val: Ooxml.wval(e), sz: e.getAttributeNS(Ooxml.NS.w, 'sz') } : null;
+      }
+      check('三线表：顶线为粗单线', edgeVal('top') && edgeVal('top').val === 'single' && edgeVal('top').sz === '8',
+        JSON.stringify(edgeVal('top')));
+      check('三线表：底线为粗单线', edgeVal('bottom') && edgeVal('bottom').val === 'single');
+      check('三线表：无竖线与内横线', edgeVal('insideV').val === 'none' && edgeVal('insideH').val === 'none');
+      var tRows = Ooxml.children(T, 'tr');
+      var hdrBottom = null;
+      var hdrTcPr = Ooxml.child(Ooxml.children(tRows[0], 'tc')[0], 'tcPr');
+      if (hdrTcPr) { var hb = Ooxml.child(hdrTcPr, 'tcBorders'); hdrBottom = hb ? Ooxml.child(hb, 'bottom') : null; }
+      check('三线表：表头下方有细线', !!hdrBottom && Ooxml.wval(hdrBottom) === 'single',
+        hdrBottom ? Ooxml.wval(hdrBottom) + '/sz=' + hdrBottom.getAttributeNS(Ooxml.NS.w, 'sz') : 'none');
+      var hdrShd = Ooxml.child(hdrTcPr, 'shd');
+      check('表头底色已填充', hdrShd && (hdrShd.getAttributeNS(Ooxml.NS.w, 'fill') || '').toUpperCase() === 'DCE6F1',
+        hdrShd ? hdrShd.getAttributeNS(Ooxml.NS.w, 'fill') : 'none');
+      var trPr0 = Ooxml.child(tRows[0], 'trPr');
+      check('表头行设置了跨页重复', !!(trPr0 && Ooxml.child(trPr0, 'tblHeader')));
+      var th = trPr0 ? Ooxml.child(trPr0, 'trHeight') : null;
+      check('行高已设置（1cm=567、最小值）', th && Ooxml.wval(th) === '567' &&
+        (th.getAttributeNS(Ooxml.NS.w, 'hRule') || '') === 'atLeast',
+        th ? Ooxml.wval(th) + '/' + th.getAttributeNS(Ooxml.NS.w, 'hRule') : 'none');
+      var tblW = TPr ? Ooxml.child(TPr, 'tblW') : null;
+      var tblLayout = TPr ? Ooxml.child(TPr, 'tblLayout') : null;
+      check('超页宽的表格被缩放并锁定布局（适配页宽）', tblW &&
+        (tblW.getAttributeNS(Ooxml.NS.w, 'type') || '') === 'dxa' &&
+        !!tblLayout && (tblLayout.getAttributeNS(Ooxml.NS.w, 'type') || '') === 'fixed',
+        (tblW ? tblW.getAttributeNS(Ooxml.NS.w, 'w') + '/' + tblW.getAttributeNS(Ooxml.NS.w, 'type') : 'none') +
+        ' layout=' + (tblLayout ? tblLayout.getAttributeNS(Ooxml.NS.w, 'type') : 'none'));
+      var span = 0;
+      var allTcs = T.getElementsByTagNameNS(Ooxml.NS.w, 'tc');
+      for (var z = 0; z < allTcs.length; z++) {
+        var tp = Ooxml.child(allTcs[z], 'tcPr');
+        var gs2 = tp ? Ooxml.child(tp, 'gridSpan') : null;
+        if (gs2 && Ooxml.wval(gs2) === '2') span++;
+      }
+      check('合并单元格结构被保留（gridSpan=2 仍在）', span >= 1, span + ' 个');
+      var afterData = cellTextsT(docT4);
+      check('表格数据内容 100% 保留（单元格数一致、数值一致）',
+        afterData.length === dataBefore.length &&
+        ['指标', '2022年', '2023年', '2.85', '3.14', '12.5%', '10.2%'].every(function (v) {
+          return afterData.join('|').indexOf(v) >= 0;
+        }),
+        afterData.length + ' 个单元格: ' + JSON.stringify(afterData.slice(0, 5)));
+      var numCentered = 0, psT = T.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      for (var z2 = 0; z2 < psT.length; z2++) {
+        var pp3 = Ooxml.getPPr(psT[z2]);
+        var jc3 = pp3 ? Ooxml.child(pp3, 'jc') : null;
+        if (jc3 && Ooxml.wval(jc3) === 'center') numCentered++;
+      }
+      check('表格数字/文字已居中', numCentered >= 6, numCentered + ' 段');
+      check('报告统计表格样式数', resT3.report.tablesStyled >= 1, resT3.report.tablesStyled);
+
+      // 小数点对齐（十进制制表位）
+      var resDec = await Engine.process(doc, Store.merge(tblP2, { table: { numberAlign: 'decimal', applyParagraph: false } }));
+      var docDec = await Ooxml.open(await resDec.blob.arrayBuffer(), 'dec.docx');
+      var decTabs = 0;
+      var tabsAll = docDec.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tabs');
+      for (var z3 = 0; z3 < tabsAll.length; z3++) {
+        var tEl = Ooxml.children(tabsAll[z3], 'tab')[0];
+        if (tEl && Ooxml.wval(tEl) === 'decimal') decTabs++;
+      }
+      check('小数点对齐：已插入十进制制表位', decTabs >= 2, decTabs + ' 个');
+      check('小数点对齐：数据仍然完整', (function () {
+        var a = cellTextsT(docDec);
+        return a.length === dataBefore.length && ['2.85', '3.14', '12.5%', '10.2%', '指标'].every(function (v) {
+          return a.join('|').indexOf(v) >= 0;
+        });
+      })(), JSON.stringify(cellTextsT(docDec).slice(0, 4)));
+      var resBd = await Engine.process(doc, Store.merge(tblP2, { table: { borderStyle: 'single', borderSize: 6 } }));
+      var docBd = await Ooxml.open(await resBd.blob.arrayBuffer(), 'bd.docx');
+      var tbBd = Ooxml.child(Ooxml.child(docBd.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl')[0], 'tblPr'), 'tblBorders');
+      check('切换为全框线单线表',
+        Ooxml.wval(Ooxml.child(tbBd, 'insideV')) === 'single' && Ooxml.wval(Ooxml.child(tbBd, 'insideH')) === 'single');
+      check('内置 3 套表格模板可用', Array.isArray(DFT.TABLE_TEMPLATES) && DFT.TABLE_TEMPLATES.length === 3,
+        (DFT.TABLE_TEMPLATES || []).map(function (t) { return t.name; }).join('/'));
+
+      out('== 13. 手动标记（页面 / 段落）不整改 ==');
+      var pages = Engine._internals.pageSummary(doc.xml);
+      out('  页面清单: ' + pages.map(function (p) { return p.page + '(' + p.chars + '字)'; }).join(' '));
+      check('可以扫描出页面清单', pages.length >= 3, pages.length + ' 页');
+      check('第一页摘要含封面内容', pages[0].summary.indexOf('本科毕业论文') >= 0, pages[0].summary.slice(0, 24));
+      check('第三页摘要含正文内容', pages[2].summary.indexOf('数字化转型研究报告') >= 0, pages[2].summary.slice(0, 24));
+
+      // 手动勾选"第 3 页不整改"（关闭自动豁免，确保是手动标记在起作用）
+      var mkParams = Store.merge(DFT.DEFAULT_PARAMS, {
+        range: { manualPages: [3], manualParas: [], protectCover: false, protectToc: false }
+      });
+      var resMk = await Engine.process(doc, mkParams);
+      var docMk = await Ooxml.open(await resMk.blob.arrayBuffer(), 'mk.docx');
+      check('手动勾选的页面被完全保护（连标点空格都不改）',
+        paraXml(docMk, '这是使用标题样式的段落') === paraXml(doc, '这是使用标题样式的段落'));
+      check('对照组：未勾选的封面页被正常整改',
+        paraXml(docMk, '题目：企业数字化转型研究') !== paraXml(doc, '题目：企业数字化转型研究'));
+      check('统计中记录手动页面标记', resMk.report.skipReasons.manualPage > 0,
+        JSON.stringify(resMk.report.skipReasons));
+
+      // 手动标记单个段落（预览点选的效果）
+      var allP2 = doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      var targetIdx = -1;
+      for (var qi = 0; qi < allP2.length; qi++) {
+        if (Ooxml.paraText(allP2[qi], false).indexOf('本文研究') >= 0) { targetIdx = qi; break; }
+      }
+      check('找到待标记段落的序号', targetIdx > 0, '第 ' + targetIdx + ' 段');
+      var resMp = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        range: { manualParas: [targetIdx], protectCover: false, protectToc: false }
+      }));
+      var docMp = await Ooxml.open(await resMp.blob.arrayBuffer(), 'mp.docx');
+      check('手动点选的段落被完全保护',
+        paraXml(docMp, '本文研究') === paraXml(doc, '本文研究'));
+      check('相邻段落仍被正常整改',
+        paraXml(docMp, '第二章将介绍技术路线') !== paraXml(doc, '第二章将介绍技术路线'));
+      check('统计中记录手动段落标记', resMp.report.skipReasons.manualPara > 0,
+        JSON.stringify(resMp.report.skipReasons));
+
+      // 手动标记的优先级高于"指定页整改"
+      var resPrio = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        range: { mode: 'pages', pages: '3', manualParas: [targetIdx], protectCover: false, protectToc: false }
+      }));
+      var docPrio = await Ooxml.open(await resPrio.blob.arrayBuffer(), 'prio.docx');
+      check('手动标记优先于范围设置（即使该页在整改范围内也不改）',
+        paraXml(docPrio, '本文研究') === paraXml(doc, '本文研究'));
+
+      // 预览渲染带段落序号，供界面点选
+      var pim = new Map();
+      var allP3 = doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'p');
+      for (var pi2 = 0; pi2 < allP3.length; pi2++) pim.set(allP3[pi2], pi2);
+      var rIdx = Render.render(doc, doc.xml, { paraIndexMap: pim, skipSet: new Set([allP3[targetIdx]]), skipReason: function () { return 'manualPara'; } });
+      check('预览输出段落序号 data-pi', rIdx.html.indexOf('data-pi="' + targetIdx + '"') >= 0);
+      check('预览标记出被保护段落', rIdx.html.indexOf('dft-skip') >= 0);
+
+      out('== 14. 导出内容核查：文字必须仍是文字，不能被变成图片 ==');
+      // 正常文字文档：导出后必须有大量 w:t 文字，且 drawing 数量不增加
+      var normOut = await Ooxml.open(await (await Engine.process(doc, DFT.DEFAULT_PARAMS)).blob.arrayBuffer(), 'n.docx');
+      var tCount = normOut.xml.getElementsByTagNameNS(Ooxml.NS.w, 't').length;
+      var dIn = doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'drawing').length +
+                doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'pict').length;
+      var dOut = normOut.xml.getElementsByTagNameNS(Ooxml.NS.w, 'drawing').length +
+                 normOut.xml.getElementsByTagNameNS(Ooxml.NS.w, 'pict').length;
+      out('  原文 w:t=' + doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 't').length +
+          ' drawing=' + dIn + '  →  导出 w:t=' + tCount + ' drawing=' + dOut);
+      check('导出后文字仍是文字（w:t 数量充足）', tCount >= 100, tCount + ' 个 w:t');
+      check('导出后图片数量没有增加（文字不会被变成图片）', dOut === dIn, dIn + ' → ' + dOut);
+      check('导出后正文文字可读', texts(normOut.xml).join('').indexOf('数字化转型') >= 0);
+      check('统计里记录了可编辑字数', normOut.stats.characters > 200, normOut.stats.characters);
+      check('正常文档不会被判为图片版', normOut.stats.imageOnly === false);
+
+      out('== 15. 图片版（扫描件）文档：如实提示，不假装整改 ==');
+      var scanBuf = await httpGet('sample-scanned.docx');
+      var scanDoc = await Ooxml.open(scanBuf, 'sample-scanned.docx');
+      out('  段落=' + scanDoc.stats.paragraphs + ' 图片=' + scanDoc.stats.images +
+          ' drawing=' + scanDoc.stats.drawings + ' 可编辑文字=' + scanDoc.stats.characters + ' 字');
+      check('图片版文档：取不到可编辑文字', scanDoc.stats.characters < 30, scanDoc.stats.characters);
+      check('图片版文档：被正确识别为"内容为图片"', scanDoc.stats.imageOnly === true);
+      var resScan = await Engine.process(scanDoc, DFT.DEFAULT_PARAMS);
+      var scanOut = await Ooxml.open(await resScan.blob.arrayBuffer(), 's.docx');
+      check('图片版文档：导出后仍可正常打开', scanOut.stats.paragraphs >= 1 && scanOut.stats.images >= 1,
+        scanOut.stats.paragraphs + ' 段 / ' + scanOut.stats.images + ' 图');
+      check('图片版文档：导出后被识别为图片版（说明文字确实还是图片）', scanOut.stats.imageOnly === true);
+
+      out('== 16. 回归：开启表格格式后绝不能把表格刷成黑底 ==');
+      function countBlackFill(d) {
+        var shds = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'shd'), n = 0;
+        for (var i = 0; i < shds.length; i++) {
+          var fill = (shds[i].getAttributeNS(Ooxml.NS.w, 'fill') || '').toUpperCase();
+          if (fill === '000000' || fill === '00000000') n++;
+        }
+        return n;
+      }
+      var resBlk = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, { table: { enabled: true } }));
+      var docBlk = await Ooxml.open(await resBlk.blob.arrayBuffer(), 'blk.docx');
+      check('只开启表格格式、未启用底色时不会出现黑色底纹', countBlackFill(docBlk) === 0,
+        countBlackFill(docBlk) + ' 个黑色底纹');
+      var resBlk2 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        table: { enabled: true, borderEnabled: true, borderStyle: 'none', align: 'center', applyParagraph: true }
+      }));
+      var docBlk2 = await Ooxml.open(await resBlk2.blob.arrayBuffer(), 'blk2.docx');
+      check('只改边框/对齐也不会误刷黑底', countBlackFill(docBlk2) === 0, countBlackFill(docBlk2) + ' 个');
+      var resFill2 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        table: { enabled: true, headerFillOn: true, headerFill: '#DCE6F1', bodyFillOn: true, bodyFill: '#FFF2CC' }
+      }));
+      var docFill2 = await Ooxml.open(await resFill2.blob.arrayBuffer(), 'fill2.docx');
+      var shdsAll = docFill2.xml.getElementsByTagNameNS(Ooxml.NS.w, 'shd'), okFill = 0;
+      for (var sf = 0; sf < shdsAll.length; sf++) {
+        var fv = (shdsAll[sf].getAttributeNS(Ooxml.NS.w, 'fill') || '').toUpperCase();
+        if (fv === 'DCE6F1' || fv === 'FFF2CC') okFill++;
+      }
+      check('勾选"启用底色"后按指定颜色填充', okFill >= 6, okFill + ' 个单元格上色');
+      check('启用底色时也没有黑色', countBlackFill(docFill2) === 0, countBlackFill(docFill2) + ' 个');
+      var resNoFill = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        table: { enabled: true, headerFillOn: false, headerFill: '#000000', bodyFillOn: false, bodyFill: '#000000' }
+      }));
+      var docNoFill = await Ooxml.open(await resNoFill.blob.arrayBuffer(), 'nofill.docx');
+      check('未勾选启用时，即使颜色选择器停在黑色也不会写入', countBlackFill(docNoFill) === 0,
+        countBlackFill(docNoFill) + ' 个');
+
+      out('== 17. 字号一致性：表格/数字不得擅自比正文小 ==');
+      function tableRunSizes(d) {
+        var res = [], tbls = d.xml.getElementsByTagNameNS(Ooxml.NS.w, 'tbl');
+        for (var i = 0; i < tbls.length; i++) {
+          var rs = tbls[i].getElementsByTagNameNS(Ooxml.NS.w, 'r');
+          for (var j = 0; j < rs.length; j++) {
+            var rPr = Ooxml.getRPr(rs[j]); if (!rPr) continue;
+            var sz = Ooxml.child(rPr, 'sz');
+            if (sz && rs[j].textContent) res.push({ t: rs[j].textContent, sz: Ooxml.wval(sz) });
+          }
+        }
+        return res;
+      }
+      var resF1 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        body: { size: 12 }, table: { enabled: true }        // 表格字号默认跟随正文
+      }));
+      var dF1 = await Ooxml.open(await resF1.blob.arrayBuffer(), 'sf1.docx');
+      var sizesF1 = tableRunSizes(dF1);
+      check('表格字号默认跟随正文（12磅=24）',
+        sizesF1.length > 0 && sizesF1.every(function (r) { return r.sz === '24'; }),
+        JSON.stringify(sizesF1.slice(0, 4)));
+
+      var resF2 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        body: { size: 12 }, table: { enabled: true, sizeFollow: false, size: 9 }   // 显式指定表格 9 磅
+      }));
+      var dF2 = await Ooxml.open(await resF2.blob.arrayBuffer(), 'sf2.docx');
+      var sizesF2 = tableRunSizes(dF2);
+      check('关闭"跟随正文"后才使用表格专属字号（9磅=18）',
+        sizesF2.length > 0 && sizesF2.every(function (r) { return r.sz === '18'; }),
+        JSON.stringify(sizesF2.slice(0, 4)));
+
+      // 正文数字：默认跟随正文（independent=false），开启独立后才用自己的字号
+      function digitSizesIn(d, needle) {
+        var p = findByText(d, needle);
+        if (!p) return [];
+        var out = [], rs = p.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+        for (var i = 0; i < rs.length; i++) {
+          if (!/[0-9]/.test(rs[i].textContent)) continue;
+          var rPr = Ooxml.getRPr(rs[i]); var sz = rPr ? Ooxml.child(rPr, 'sz') : null;
+          if (sz) out.push(Ooxml.wval(sz));
+        }
+        return out;
+      }
+      var resD1 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        body: { size: 12 }, digit: { enabled: true, body: { font: 'Times New Roman', size: 9, independent: false } }
+      }));
+      var dD1 = await Ooxml.open(await resD1.blob.arrayBuffer(), 'sd1.docx');
+      var bodyDigitSizes = digitSizesIn(dD1, '2023年营业收入');
+      check('正文数字默认跟随正文字号（不勾选独立设置时）',
+        bodyDigitSizes.length > 0 && bodyDigitSizes.every(function (v) { return v === '24'; }),
+        JSON.stringify(bodyDigitSizes.slice(0, 6)));
+      var resD2 = await Engine.process(doc, Store.merge(DFT.DEFAULT_PARAMS, {
+        body: { size: 12 }, digit: { enabled: true, body: { font: 'Times New Roman', size: 9, independent: true } }
+      }));
+      var dD2 = await Ooxml.open(await resD2.blob.arrayBuffer(), 'sd2.docx');
+      var digitSizes2 = digitSizesIn(dD2, '2023年营业收入');
+      check('勾选"独立设置数字字号"后按数字专属字号（9磅=18）',
+        digitSizes2.length > 0 && digitSizes2.every(function (v) { return v === '18'; }),
+        JSON.stringify(digitSizes2.slice(0, 6)));
+
+      out('== 18. 数字与单位规范（知识库驱动） ==');
+      var kb = DFT.KNOWLEDGE;
+      check('规范知识库已加载', !!kb && kb.categories.length >= 8,
+        kb ? (kb.stats().categories + ' 类 / ' + kb.stats().items + ' 条 / ' +
+              kb.stats().units + ' 个单位 / ' + kb.stats().wrongForms + ' 种错误写法') : '未加载');
+      check('知识库条目都带示例与级别', !!kb && kb.categories.every(function (c) {
+        return c.items.every(function (it) { return it.id && it.text && it.level && (it.ok || it.bad); });
+      }));
+      var uOpt = { halfWidth: true, fixSpelling: true, celsius: 'degree', celsiusSpace: true,
+        spaceNumber: true, tightPercent: true, mathSpace: true, timesSign: true,
+        slashTight: true, superDigit: true };
+      var unitCases = [
+        ['10μL', '10 μL'], ['15KD', '15 kDa'], ['95 %', '95%'], ['P<0.05', 'P < 0.05'],
+        ['3 x 10', '3 × 10'], ['5 ng / μL', '5 ng/μL'], ['500 ml', '500 mL'], ['30 sec', '30 s'],
+        ['12000 RPM', '12000 rpm'], ['37℃', '37 °C'], ['dna', 'DNA'], ['OD600', 'OD₆₀₀'],
+        ['4h', '4 h'], ['2 h', '2 h'], ['10 倍', '10 倍'], ['第1章', '第1章'],
+        ['2023年', '2023年'], ['H2O', 'H2O'], ['IC50', 'IC₅₀'], ['10^10', '10¹⁰'],
+        ['mg / mL', 'mg/mL'], ['pH7.4', 'pH 7.4']
+      ];
+      unitCases.forEach(function (c) {
+        var h = Engine._internals.newUnitHits();
+        var got = Engine._internals.fixUnitString(c[0], uOpt, h);
+        check('单位规范：' + c[0] + ' → ' + c[1], got === c[1], got);
+      });
+
+      var uDoc = await Ooxml.fromParagraphs([{ text: '取 10μL 样品，加入 15KD 蛋白，抑制率 95 %，P<0.05，转速 12000 RPM，37℃ 孵育 30 sec，浓度 5 ng / μL。' }],
+        { title: 'u', fileName: 'u.docx' });
+      var uRes = await Engine.process(uDoc, Store.merge(DFT.DEFAULT_PARAMS, { unit: { enabled: true } }));
+      var uOut = await Ooxml.open(await uRes.blob.arrayBuffer(), 'u2.docx');
+      var uText = texts(uOut.xml).join('');
+      out('  整改后：' + uText);
+      check('端到端：单位拼写与空格全部修正',
+        uText.indexOf('10 μL') >= 0 && uText.indexOf('15 kDa') >= 0 && uText.indexOf('95%') >= 0 &&
+        uText.indexOf('P < 0.05') >= 0 && uText.indexOf('12000 rpm') >= 0 &&
+        uText.indexOf('30 s') >= 0 && uText.indexOf('5 ng/μL') >= 0, uText);
+      check('端到端：报告记录了修正处数', uRes.report.unitFixed > 5, uRes.report.unitFixed);
+      var uOff = await Engine.process(uDoc, Store.merge(DFT.DEFAULT_PARAMS, { unit: { enabled: false } }));
+      var uOffDoc = await Ooxml.open(await uOff.blob.arrayBuffer(), 'u3.docx');
+      check('默认关闭时完全不动原文', texts(uOffDoc.xml).join('').indexOf('10μL') >= 0,
+        texts(uOffDoc.xml).join(''));
+      var uScan = Engine.analyze(uDoc, DFT.DEFAULT_PARAMS);
+      var uFinding = uScan.findings.filter(function (x) { return x.id === 'unit_format'; })[0];
+      check('格式检测能报出"数字与单位不规范"', !!uFinding && uFinding.count >= 6,
+        uFinding ? (uFinding.count + ' 处：' + uFinding.detail.slice(0, 60)) : '未报出');
+    } catch (e) {
+      failed++;
+      out('!! 异常: ' + e.message + '\n' + (e.stack || ''));
+    }
+    out('');
+    out(failed ? ('===== 测试结束：' + failed + ' 项失败 =====') : '===== 全部测试通过 =====');
+    out('__TEST_DONE__');
+  })();
+})();
+</script>
+</body>
+</html>

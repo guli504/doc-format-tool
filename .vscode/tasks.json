@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "重新打包（生成单文件版）",
+      "detail": "把 js/ css/ index.html 合成 发布/文档格式整改工具.html",
+      "type": "process",
+      "command": "C:\\Users\\21475\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe",
+      "args": [ "build/build-single.js" ],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "打开成品（发布\\文档格式整改工具.html）",
+      "detail": "在默认浏览器里打开打包好的单文件版",
+      "type": "shell",
+      "command": "start \"\" \"${workspaceFolder}\\发布\\文档格式整改工具.html\"",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "推送线上（更新线上网站）",
+      "detail": "同步到网站版并推送到 GitHub Pages（约 1 分钟后生效）",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\发布\\更新线上网站.ps1\"",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}

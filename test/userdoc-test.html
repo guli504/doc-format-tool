@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>用户文档字号验证</title></head>
+<body>
+<pre id="out">running…</pre>
+<script src="../js/vendor/jszip.min.js"></script>
+<script src="../js/constants.js"></script>
+<script src="../js/knowledge.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/ooxml.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/legacy-doc.js"></script>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  function log(s) { out.textContent += '\n' + s; }
+  function hist(doc, inTable) {
+    var h = {}, tbls = [];
+    var all = doc.xml.getElementsByTagNameNS(Ooxml.NS.w, 'r');
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i], node = r.parentNode, isIn = false;
+      while (node) { if (node.nodeType === 1 && Ooxml.localName(node) === 'tbl') { isIn = true; break; } node = node.parentNode; }
+      if (isIn !== !!inTable) continue;
+      var rPr = Ooxml.getRPr(r); if (!rPr) continue;
+      var sz = Ooxml.child(rPr, 'sz'); if (!sz) continue;
+      if (!r.textContent) continue;
+      var v = Ooxml.wval(sz);
+      h[v] = (h[v] || 0) + 1;
+    }
+    return h;
+  }
+  (async function () {
+    try {
+      var p = new URLSearchParams(location.search);
+      var file = p.get('file') || 'userdoc.docx';
+      var mode = p.get('mode') || 'follow';
+      var buf = await (await fetch(file + '?t=' + Date.now())).arrayBuffer();
+      var doc = await Ooxml.open(buf, file);
+      log('文件: ' + file + '  段落=' + doc.stats.paragraphs + ' 表格=' + doc.stats.tables +
+          ' 可编辑文字=' + doc.stats.characters);
+
+      var tblCfg = (mode === 'fixed')
+        ? { enabled: true, sizeFollow: false, size: 10.5 }
+        : { enabled: true };                       // 默认：字号跟随正文
+      var params = Store.merge(DFT.DEFAULT_PARAMS, {
+        body: { cnFont: '仿宋', size: 12 },        // 正文：仿宋 小四 12 磅
+        table: Store.merge({ cnFont: '仿宋' }, tblCfg)
+      });
+      var res = await Engine.process(doc, params);
+      var outDoc = await Ooxml.open(await res.blob.arrayBuffer(), 'x.docx');
+      log('模式: ' + (mode === 'fixed' ? '表格字号独立设为 10.5 磅' : '表格字号跟随正文'));
+      log('  表格内字号分布(半点): ' + JSON.stringify(hist(outDoc, true)));
+      log('  表格外字号分布(半点): ' + JSON.stringify(hist(outDoc, false)));
+      log('  （24 = 12磅 = 小四；21 = 10.5磅 = 五号）');
+      var r = await fetch('/save/out-userdoc-' + mode + '.docx', { method: 'POST', body: res.blob });
+      log('  已保存 out-userdoc-' + mode + '.docx -> ' + r.status);
+      log('__DONE__');
+    } catch (e) {
+      log('ERROR ' + e.message + '\n' + (e.stack || ''));
+      log('__DONE__');
+    }
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>界面自动化演示</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100vw;height:100vh;display:block}#log{position:fixed;left:0;bottom:0;background:#000c;color:#0f0;font:12px Consolas,monospace;padding:4px 8px;white-space:pre;z-index:9}</style>
+</head>
+<body>
+<iframe id="f"></iframe>
+<pre id="log"></pre>
+<script>
+/* 自动化：加载指定页面（默认 index.html，可传 ?src= 指定单文件版）→ 导入样例 → 整改 → 检测 → 回传导出文件 */
+(function () {
+  var params = new URLSearchParams(location.search);
+  var src = params.get('src') || '/index.html';
+  if (src.charAt(0) !== '/') src = '/' + src;   // 保证相对路径按站点根解析
+  var saveName = params.get('save') || '';
+  var frame = document.getElementById('f');
+  var logEl = document.getElementById('log');
+  var lines = [], failed = 0;
+  function log(s) { lines.push(s); logEl.textContent = lines.join('\n'); }
+  function check(name, cond, extra) {
+    if (!cond) failed++;
+    log((cond ? '[PASS] ' : '[FAIL] ') + name + (extra !== undefined ? ' -> ' + extra : ''));
+  }
+  frame.src = src;
+
+  // 轮询等待 iframe 内的应用就绪（避免 load 事件时序问题）
+  var tries = 0;
+  (function waitApp() {
+    var app = null;
+    try { app = frame.contentWindow && frame.contentWindow.__DFT_APP__; } catch (e) { app = null; }
+    if (!app) {
+      if (tries++ < 80) return setTimeout(waitApp, 250);
+      check('页面加载并注入应用', false, '超时未就绪');
+      finish();
+      return;
+    }
+    run(app);
+  })();
+
+  function finish() {
+    log('');
+    log(failed ? ('===== ' + failed + ' 项失败 =====') : '===== 全部通过 =====');
+    log('__UI_DONE__');
+    document.title = failed ? 'UI-FAIL' : 'UI-OK';
+  }
+
+  async function run(app) {
+    try {
+      var win = frame.contentWindow, doc = frame.contentDocument;
+      var app = win.__DFT_APP__;
+      check('页面加载并注入应用', !!app);
+      if (!app) { log('__UI_DONE__'); return; }
+
+      // 界面动态内容
+      check('模板卡片已渲染', doc.querySelectorAll('#tplGrid .tpl').length === 6, doc.querySelectorAll('#tplGrid .tpl').length);
+      check('标题层级设置已生成', doc.querySelectorAll('#headingBoxes input[data-param]').length === 21, doc.querySelectorAll('#headingBoxes input[data-param]').length);
+      check('字体下拉框已填充', doc.querySelector('[data-param="body.cnFont"]').options.length > 10, doc.querySelector('[data-param="body.cnFont"]').options.length);
+      check('字体库列表已渲染', doc.querySelectorAll('#fontList .font-row').length > 10, doc.querySelectorAll('#fontList .font-row').length);
+      check('字号预设已填充', doc.querySelectorAll('#sizeList option').length >= 10, doc.querySelectorAll('#sizeList option').length);
+      check('字号旁显示中文字号名', (function () {
+        var t = doc.querySelector('[data-size-name="body.size"]');
+        return t && /小四/.test(t.textContent) && /12/.test(t.textContent);
+      })(), (doc.querySelector('[data-size-name="body.size"]') || {}).textContent);
+      check('表格字号默认跟随正文', doc.querySelector('[data-param="table.sizeFollow"]').checked === true);
+      check('字号下拉已写明磅值对照', /小四 = 12 磅/.test(doc.getElementById('sizeList').innerHTML));
+      check('表格格式设置已生成', doc.querySelectorAll('[data-param^="table."]').length >= 20, doc.querySelectorAll('[data-param^="table."]').length);
+      check('角标设置已生成', doc.querySelectorAll('[data-param^="script."]').length >= 10, doc.querySelectorAll('[data-param^="script."]').length);
+      check('数字与单位面板已生成', doc.querySelectorAll('[data-param^="unit."]').length >= 10, doc.querySelectorAll('[data-param^="unit."]').length);
+      check('规范知识库已加载', !!win.DFT.KNOWLEDGE && win.DFT.KNOWLEDGE.categories.length >= 8,
+        win.DFT.KNOWLEDGE ? win.DFT.KNOWLEDGE.stats().items + ' 条规范' : '无');
+      doc.getElementById('btnKb').click();
+      check('点「规范库」打开弹层', doc.getElementById('kbModal').hidden === false);
+      check('知识库条目已渲染', doc.querySelectorAll('#kbBody .kb-item').length >= 40, doc.querySelectorAll('#kbBody .kb-item').length);
+      check('知识库显示统计信息', /条规范/.test(doc.getElementById('kbStat').textContent), doc.getElementById('kbStat').textContent);
+      var kbs = doc.getElementById('kbSearch');
+      kbs.value = 'kDa';
+      kbs.dispatchEvent(new win.Event('input', { bubbles: true }));
+      await new Promise(function (r) { setTimeout(r, 350); });
+      var kbHits = doc.querySelectorAll('#kbBody .kb-item').length;
+      check('知识库可搜索', kbHits >= 1 && kbHits < 25, kbHits + ' 条命中');
+      kbs.value = '';
+      kbs.dispatchEvent(new win.Event('input', { bubbles: true }));
+      await new Promise(function (r) { setTimeout(r, 200); });
+      doc.getElementById('btnCloseKb').click();
+      check('可关闭知识库弹层', doc.getElementById('kbModal').hidden === true);
+      if (params.get('showkb')) { doc.getElementById('btnKb').click(); log('已打开规范知识库用于截图'); }
+      check('整改范围设置已生成', doc.querySelectorAll('[data-param^="range."]').length >= 8, doc.querySelectorAll('[data-param^="range."]').length);
+      check('3 套表格模板已渲染', doc.querySelectorAll('#tblTplGrid .tpl').length === 3, doc.querySelectorAll('#tblTplGrid .tpl').length);
+      check('弹层默认隐藏', doc.getElementById('helpModal').hidden === true);
+      /* ---------- 新版界面外壳 ---------- */
+      check('空状态显示引导插画', doc.querySelectorAll('#hostOriginal .empty-state .illus').length === 1);
+      check('分类筛选条已生成', doc.querySelectorAll('#catBar .cat-chip').length >= 8, doc.querySelectorAll('#catBar .cat-chip').length);
+      check('卡片已按分类标记', doc.querySelectorAll('.sec[data-cat]').length >= 16, doc.querySelectorAll('.sec[data-cat]').length);
+      var sideToggle = doc.getElementById('btnSideToggle');
+      var narrow = win.innerWidth <= 1180;
+      sideToggle.click();
+      check('点击「设置」收起左侧面板',
+        narrow ? !doc.body.classList.contains('side-open') : doc.body.classList.contains('side-collapsed'),
+        '窄屏=' + narrow);
+      sideToggle.click();
+      check('再点一次展开面板', !doc.body.classList.contains('side-collapsed'));
+      doc.querySelector('#catBar .cat-chip[data-cat="table"]').click();
+      check('分类筛选生效', doc.querySelector('.side').dataset.filter === 'table');
+      doc.querySelector('#catBar .cat-chip[data-cat="all"]').click();
+      check('可切回「全部」', doc.querySelector('.side').dataset.filter === 'all');
+
+      if (!params.get('quick')) {
+        // 导入 → 整改 → 检测
+        var buf = await (await fetch('/test/' + (params.get('scanned') ? 'sample-scanned.docx' : 'sample.docx') + '?t=' + Date.now())).arrayBuffer();
+        var file = new win.File([new Uint8Array(buf)], params.get('scanned') ? '扫描件文档.docx' : '数字化转型研究报告.docx');
+        await app.importFiles([file]);
+        check('导入后文件数 = 1', app.state.files.length === 1, app.state.files.length);
+        await app.runProcess(true);
+        var f = app.state.files[0];
+        check('整改已生成 blob', !!f.blob && f.blob.size > 5000, f.blob ? f.blob.size : 0);
+        check('整改统计有内容', !!f.report && f.report.punctFixed > 0, f.report ? JSON.stringify(f.report) : '');
+        app.detectIssues();
+        check('问题清单已渲染', doc.querySelectorAll('#issuesBody .issue').length > 3, doc.querySelectorAll('#issuesBody .issue').length);
+        check('预览已渲染（整改后）', doc.querySelectorAll('#hostFixed .page').length === 1);
+        check('预览已渲染（原文档）', doc.querySelectorAll('#hostOriginal .page').length === 1);
+        check('分节规则表已生成', doc.querySelectorAll('#sectionRules select').length >= 1, doc.querySelectorAll('#sectionRules select').length);
+        check('页面清单已生成', doc.querySelectorAll('#pageList .page-row').length >= 3, doc.querySelectorAll('#pageList .page-row').length);
+        check('点选标记按钮存在', !!doc.getElementById('btnMarkMode'));
+        check('预览段落带序号(data-pi)', doc.querySelectorAll('#hostOriginal [data-pi]').length > 5, doc.querySelectorAll('#hostOriginal [data-pi]').length);
+        check('保护区域已在原文档预览中高亮', doc.querySelectorAll('#hostOriginal .dft-skip').length > 0, doc.querySelectorAll('#hostOriginal .dft-skip').length);
+
+        /* ---------- 分屏分割线 + 问题定位 ---------- */
+        check('分屏模式下分割线可见', win.getComputedStyle(doc.getElementById('splitter')).display !== 'none');
+        var pv = doc.getElementById('previewBody'), sp = doc.getElementById('splitter');
+        sp.dispatchEvent(new win.MouseEvent('mousedown', { bubbles: true, clientX: 800 }));
+        doc.dispatchEvent(new win.MouseEvent('mousemove', { bubbles: true, clientX: 1120 }));
+        doc.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+        check('拖动分割线改变左右比例', parseFloat(pv.style.getPropertyValue('--split')) > 50,
+          pv.style.getPropertyValue('--split'));
+        sp.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true }));
+        check('双击分割线复位 50%', Math.abs(parseFloat(pv.style.getPropertyValue('--split')) - 50) < 0.6,
+          pv.style.getPropertyValue('--split'));
+        var locItem = doc.querySelector('#issuesBody .issue[data-locate]');
+        check('问题条目带定位能力', !!locItem);
+        if (locItem) {
+          var sample = decodeURIComponent(locItem.dataset.locate || '').replace(/…+$/, '');
+          var key = sample.slice(0, Math.max(4, Math.floor(sample.length * 0.6))).replace(/\s+/g, '');
+          var hit = 0, nodes = doc.querySelectorAll('#hostOriginal p, #hostFixed p');
+          for (var ni = 0; ni < nodes.length; ni++) {
+            if (nodes[ni].textContent.replace(/\s+/g, '').indexOf(key) >= 0) hit++;
+          }
+          log('  定位样本="' + sample.slice(0, 26) + '" 预览段落数=' + nodes.length + ' 命中=' + hit);
+          locItem.click();
+          await new Promise(function (r) { setTimeout(r, 400); });
+          check('点击后预览高亮定位到对应位置',
+            doc.querySelectorAll('.locate-flash').length > 0,
+            '命中=' + hit + ' flash=' + doc.querySelectorAll('.locate-flash').length);
+        }
+
+        // 图片版（扫描件）文档：必须给出明确提示，而不是默默导出一堆图片
+        var scanBuf = await (await fetch('/test/sample-scanned.docx?t=' + Date.now())).arrayBuffer();
+        await app.importFiles([new win.File([new Uint8Array(scanBuf)], '扫描件文档.docx')]);
+        var last = app.state.files[app.state.files.length - 1];
+        check('图片版文档被识别', last.imageOnly === true);
+        check('文件状态标注"内容是图片"', String(last.status || '').indexOf('图片') >= 0, last.status);
+        check('导入区出现图片版警告', (doc.getElementById('importHint').textContent || '').indexOf('图片') >= 0);
+        app.state.files.pop();
+        app.state.activeId = app.state.files[0].id;
+
+        // 模拟"手动勾选第 1 页不整改"
+        var firstBox = doc.querySelector('#pageList .page-row input');
+        if (firstBox) {
+          firstBox.checked = true;
+          firstBox.dispatchEvent(new win.Event('change', { bubbles: true }));
+          await new Promise(function (r) { setTimeout(r, 1200); });
+          check('手动勾选页面后生效', (app.state.files[0].manualPages || []).length === 1,
+            JSON.stringify(app.state.files[0].manualPages));
+        }
+        // 模拟"点选标记模式"
+        var markBtn = doc.getElementById('btnMarkMode');
+        markBtn.click();
+        check('点选标记模式已开启', doc.body.classList.contains('mark-mode'));
+
+        // 截图用：展开全部设置区并滚动到"手动标记页面"
+        if (params.get('showmark')) {
+          Array.prototype.forEach.call(doc.querySelectorAll('details.sec'), function (d) { d.open = true; });
+          var pl = doc.getElementById('pageList');
+          if (pl && pl.scrollIntoView) pl.scrollIntoView({ block: 'center' });
+          // 顺手标记几个段落，展示点选效果
+          var hosts = doc.querySelectorAll('#hostOriginal [data-pi]');
+          for (var hi = 2; hi < Math.min(hosts.length, 6); hi++) {
+            hosts[hi].click();
+          }
+          await new Promise(function (r) { setTimeout(r, 1500); });
+          log('已展开设置区并滚动到手动标记区域');
+        }
+
+        if (saveName) {
+          var r = await fetch('/save/' + saveName, { method: 'POST', body: f.blob });
+          check('结果已回传到测试服务器', r.ok);
+        }
+      }
+    } catch (e) {
+      failed++;
+      log('[FAIL] 异常: ' + e.message + '\n' + (e.stack || ''));
+    }
+    finish();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>导出验证</title></head>
+<body>
+<pre id="out">running…</pre>
+<script src="../js/vendor/jszip.min.js"></script>
+<script src="../js/constants.js"></script>
+<script src="../js/knowledge.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/ooxml.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/legacy-doc.js"></script>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  function log(s) { out.textContent += '\n' + s; }
+  async function get(url) {
+    var r = await fetch(url);
+    return r.arrayBuffer();
+  }
+  async function post(name, data) {
+    var r = await fetch('/save/' + name, { method: 'POST', body: data });
+    return r.text();
+  }
+  (async function () {
+    try {
+      var buf = await get('sample.docx');
+      var doc = await Ooxml.open(buf, 'sample.docx');
+      var summary = [];
+      for (var i = 0; i < DFT.TEMPLATES.length; i++) {
+        var t = DFT.TEMPLATES[i];
+        var params = Store.merge(DFT.DEFAULT_PARAMS, t.params);
+        var res = await Engine.process(doc, params);
+        var name = 'out-' + t.id + '.docx';
+        await post(name, res.blob);
+        summary.push({ tpl: t.name, file: name, bytes: res.blob.size, report: res.report });
+        log('exported ' + name + ' ' + res.blob.size + ' bytes');
+      }
+      // 再导出一份「旧 .doc 转换后整改」的结果
+      var legBuf = await get('sample-legacy.doc');
+      var legDoc = await LegacyDoc.convert(legBuf, 'sample-legacy.doc');
+      var r2 = await Engine.process(legDoc, Store.merge(DFT.DEFAULT_PARAMS, DFT.TEMPLATES[0].params));
+      await post('out-legacy.docx', r2.blob);
+      log('exported out-legacy.docx ' + r2.blob.size + ' bytes');
+
+      // 保存统计结果
+      await post('summary.json', JSON.stringify(summary, null, 2));
+      log('__EXPORT_DONE__');
+    } catch (e) {
+      log('ERROR ' + e.message + '\n' + e.stack);
+      log('__EXPORT_DONE__');
+    }
+  })();
+})();
+</script>
+</body>
+</html>

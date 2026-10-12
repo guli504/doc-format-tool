@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "backend": "native",
+  "rasterEngine": "pdfium",
+  "source": "saved",
+  "inputPath": "D:\\deepseek harness\\doc-format-tool\\test\\out\\userdoc\\user.pdf",
+  "sourceSha256": "096cf0ac1d7bab74e2c61452017683e15b7970f7d2c56118421103f86dd90203",
+  "dpi": 100,
+  "pageCount": 7,
+  "images": [
+    {
+      "index": 1,
+      "page": 1,
+      "path": "D:\\deepseek harness\\doc-format-tool\\test\\out\\userdoc\\pages\\page-0001.png",
+      "width": 827,
+      "height": 1170,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 793.7333333333333,
+        "height": 1122.5333333333333
+      },
+      "byteLength": 15984
+    },
+    {
+      "index": 2,
+      "page": 2,
+      "path": "D:\\deepseek harness\\doc-format-tool\\test\\out\\userdoc\\pages\\page-0002.png",
+      "width": 827,
+      "height": 1170,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 793.7333333333333,
+        "height": 1122.5333333333333
+      },
+      "byteLength": 35809
+    }
+  ],
+  "missingFonts": []
+}

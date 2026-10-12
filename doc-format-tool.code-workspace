@@ -1,0 +1,26 @@
+{
+  "folders": [
+    { "path": "." }
+  ],
+  "settings": {
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": true,
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/.git": true
+    },
+    "editor.formatOnSave": false,
+    "editor.tabSize": 2,
+    "liveServer.settings.port": 8899,
+    "liveServer.settings.root": "/",
+    "liveServer.settings.donotShowInfoMsg": true,
+    "explorer.confirmDragAndDrop": false
+  },
+  "extensions": {
+    "recommendations": [
+      "ritwickdey.LiveServer",
+      "ms-ceintl.vscode-language-pack-zh-hans",
+      "dbaeumer.vscode-eslint"
+    ]
+  }
+}

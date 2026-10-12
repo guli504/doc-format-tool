@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>复现：老设置残留 + 打开表格格式标准化</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100vw;height:100vh;display:block}#log{position:fixed;left:0;bottom:0;background:#000c;color:#0f0;font:12px Consolas,monospace;padding:4px 8px;white-space:pre;z-index:9}</style>
+</head>
+<body>
+<div id="log">准备中…</div>
+<script>
+/* 复现用户的真实场景：
+   1) localStorage 里残留着老版本被污染的参数（黑色底色、没有 On 开关）
+   2) 用户打开「⑥ 表格格式标准化」
+   3) 一键整改 → 检查导出的文档里有没有黑色底纹
+*/
+(function () {
+  var lines = [], failed = 0;
+  function log(s) { lines.push(s); document.getElementById('log').textContent = lines.join('\n'); }
+  function check(name, cond, extra) {
+    if (!cond) failed++;
+    log((cond ? '[PASS] ' : '[FAIL] ') + name + (extra !== undefined ? ' -> ' + extra : ''));
+  }
+
+  // ① 写入"被老版本污染"的参数（table 里是 #000000，且没有 headerFillOn / bodyFillOn）
+  var poisoned = {
+    table: { enabled: true, headerFill: '#000000', bodyFill: '#000000', borderEnabled: true, borderStyle: 'none' },
+    script: { color: '#000000' }
+  };
+  localStorage.setItem('dft.v1.params', JSON.stringify(poisoned));
+  localStorage.setItem('dft.v1.paramsVersion', '1');   // 标记为"老版本存的"
+  log('已写入被污染的老参数: ' + JSON.stringify(poisoned.table));
+
+  // ② 再加载页面（这样 app 启动时读到的就是老参数）
+  var f = document.createElement('iframe');
+  document.body.appendChild(f);
+  f.src = '/index.html';
+
+  var tries = 0;
+  (function waitApp() {
+    var app = null;
+    try { app = f.contentWindow && f.contentWindow.__DFT_APP__; } catch (e) { }
+    if (!app) {
+      if (tries++ < 80) return setTimeout(waitApp, 250);
+      check('页面加载', false, '超时');
+      finish(); return;
+    }
+    run(app);
+  })();
+
+  function finish() {
+    log('');
+    log(failed ? ('===== ' + failed + ' 项失败 =====') : '===== 全部通过 =====');
+    log('__DONE__');
+  }
+
+  async function run(app) {
+    try {
+      var win = f.contentWindow, doc = f.contentDocument;
+      var p = win.Store.loadParams();
+      log('加载后的参数: headerFill=' + p.table.headerFill + ' headerFillOn=' + p.table.headerFillOn +
+          ' / bodyFill=' + p.table.bodyFill + ' bodyFillOn=' + p.table.bodyFillOn);
+
+      check('老版本残留的黑色底色已被清理（不是 #000000）',
+        String(p.table.headerFill).toUpperCase().replace('#', '') !== '000000' &&
+        String(p.table.bodyFill).toUpperCase().replace('#', '') !== '000000',
+        p.table.headerFill + ' / ' + p.table.bodyFill);
+      check('"启用底色"开关为关闭状态', p.table.headerFillOn === false && p.table.bodyFillOn === false);
+      check('界面上"启用表头底色"复选框未勾选', doc.querySelector('[data-param="table.headerFillOn"]').checked === false);
+      check('表格格式标准化开关是打开的（复现用户操作）', doc.querySelector('[data-param="table.enabled"]').checked === true);
+
+      // ③ 导入并整改，导出结果回传，由外部检查有没有黑底
+      var buf = await (await fetch('/test/sample.docx?t=' + Date.now())).arrayBuffer();
+      await app.importFiles([new win.File([new Uint8Array(buf)], '测试.docx')]);
+      await app.runProcess(true);
+      var file = app.state.files[0];
+      check('整改已生成', !!file.blob && file.blob.size > 5000, file.blob ? file.blob.size : 0);
+      var r = await fetch('/save/out-stale-test.docx', { method: 'POST', body: file.blob });
+      check('结果已回传供检查黑底', r.ok);
+      log('导出统计: ' + JSON.stringify(file.report));
+    } catch (e) {
+      failed++;
+      log('[FAIL] 异常: ' + e.message + '\n' + (e.stack || ''));
+    }
+    localStorage.removeItem('dft.v1.params');
+    localStorage.removeItem('dft.v1.paramsVersion');
+    finish();
+  }
+})();
+</script>
+</body>
+</html>

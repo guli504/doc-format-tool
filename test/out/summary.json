@@ -1,0 +1,97 @@
+[
+  {
+    "tpl": "公文标准",
+    "file": "out-gov.docx",
+    "bytes": 39339,
+    "report": {
+      "headings": 5,
+      "captions": 1,
+      "bodyParas": 13,
+      "punctFixed": 21,
+      "spacesFixed": 3,
+      "emptyRemoved": 3,
+      "runsSplit": 8,
+      "sections": 1,
+      "parts": [
+        "word/document.xml"
+      ],
+      "chars": 0
+    }
+  },
+  {
+    "tpl": "大学论文",
+    "file": "out-thesis.docx",
+    "bytes": 39360,
+    "report": {
+      "headings": 5,
+      "captions": 1,
+      "bodyParas": 13,
+      "punctFixed": 21,
+      "spacesFixed": 3,
+      "emptyRemoved": 3,
+      "runsSplit": 8,
+      "sections": 1,
+      "parts": [
+        "word/document.xml"
+      ],
+      "chars": 0
+    }
+  },
+  {
+    "tpl": "实习报告",
+    "file": "out-report.docx",
+    "bytes": 39359,
+    "report": {
+      "headings": 5,
+      "captions": 1,
+      "bodyParas": 13,
+      "punctFixed": 21,
+      "spacesFixed": 3,
+      "emptyRemoved": 3,
+      "runsSplit": 8,
+      "sections": 1,
+      "parts": [
+        "word/document.xml"
+      ],
+      "chars": 0
+    }
+  },
+  {
+    "tpl": "日常办公",
+    "file": "out-office.docx",
+    "bytes": 39344,
+    "report": {
+      "headings": 5,
+      "captions": 1,
+      "bodyParas": 13,
+      "punctFixed": 21,
+      "spacesFixed": 3,
+      "emptyRemoved": 3,
+      "runsSplit": 8,
+      "sections": 1,
+      "parts": [
+        "word/document.xml"
+      ],
+      "chars": 0
+    }
+  },
+  {
+    "tpl": "期刊投稿",
+    "file": "out-journal.docx",
+    "bytes": 39345,
+    "report": {
+      "headings": 5,
+      "captions": 1,
+      "bodyParas": 13,
+      "punctFixed": 21,
+      "spacesFixed": 3,
+      "emptyRemoved": 3,
+      "runsSplit": 8,
+      "sections": 1,
+      "parts": [
+        "word/document.xml"
+      ],
+      "chars": 0
+    }
+  }
+]
