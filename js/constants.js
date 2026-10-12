@@ -361,6 +361,48 @@
         whitespace: { enabled: true, trimEnds: true, collapseSpaces: true, removeEmpty: true, maxEmpty: 0,
                       removePageBreakInEmpty: true, fullWidthSpaceToHalf: true }
       }
+    },
+    {
+      /* ===== 示例：新增模板（照抄上面 journal 模板，再按需改几行即可） ===== */
+      id: 'research',
+      name: '科研论文 · 数字单位规范',
+      desc: '理工科论文/申报书：宋体五号 + Times New Roman、1.5 倍行距、三线表、角标统一、数字与单位规范（μL/kDa/空格）自动启用',
+      params: {
+        page: { enabled: true, top: 2.54, bottom: 2.54, left: 3.17, right: 3.17 },
+        body: { enabled: true, cnFont: '宋体', latinFont: 'Times New Roman', size: 10.5, bold: false, color: '#000000' },
+        digit: {
+          enabled: true,
+          body:    { font: 'Times New Roman', size: 10.5, bold: false, color: '#000000' },
+          heading: { font: 'Times New Roman', size: 14,   bold: true,  color: '#000000' },
+          caption: { font: 'Times New Roman', size: 9,    bold: false, color: '#000000' }
+        },
+        headings: {
+          enabled: true, heuristic: true, numbering: 'chapter',
+          h1: { font: '黑体', size: 14, bold: false, color: '#000000', align: 'center', lineMode: 'multiple', lineValue: 1.5, before: 10, after: 8, indentChars: 0 },
+          h2: { font: '黑体', size: 12, bold: true,  color: '#000000', align: 'left',   lineMode: 'multiple', lineValue: 1.5, before: 6, after: 4, indentChars: 0 },
+          h3: { font: '宋体', size: 10.5, bold: true, color: '#000000', align: 'left',  lineMode: 'multiple', lineValue: 1.5, before: 4, after: 2, indentChars: 0 }
+        },
+        paragraph: { enabled: true, lineMode: 'multiple', lineValue: 1.5, before: 0, after: 0, indentChars: 2,
+                     align: 'justify', skipHeadingIndent: true, skipShortLineIndent: true, shortLineMax: 20, keepListIndent: true },
+        caption: { enabled: true, font: '宋体', size: 9, bold: false, color: '#000000', lineMode: 'multiple', lineValue: 1.0,
+                   align: 'center', indentChars: 0, prefix: '', suffix: '', detectPattern: true, afterImage: true },
+        punctuation: { enabled: true, mode: 'smart', halfWidthToHalf: true, cleanGarbage: true, smartQuotes: true,
+                       protectDecimal: true, protectUrl: true, collapseRepeats: true },
+        whitespace: { enabled: true, trimEnds: true, collapseSpaces: true, removeEmpty: true, maxEmpty: 0,
+                      removePageBreakInEmpty: true, fullWidthSpaceToHalf: true },
+        table: { enabled: true, borderEnabled: true, borderStyle: 'threeLine', borderSize: 6, borderColor: '#000000',
+                 headerBold: true, headerDetect: 'firstRow', headerFillOn: false, headerFill: '#DCE6F1',
+                 bodyFillOn: false, bodyFill: '#FFFFFF', sizeFollow: true, size: 10.5,
+                 align: 'center', fitPage: true, rowHeight: 0, applyParagraph: false, numberAlign: true,
+                 repeatHeader: true, layout: 'fixed' },
+        script: { enabled: true, mode: 'normalize', sizeMode: 'follow', font: '', colorOn: false, color: '#000000', boldFollow: true },
+        /* 数字与单位规范：本模板的关键增量（来自 js/knowledge.js） */
+        unit: {
+          enabled: true, fixSpelling: true, spaceNumber: true, tightPercent: true,
+          celsius: 'degree', celsiusSpace: true, mathSpace: true, timesSign: true,
+          slashTight: true, halfWidth: true, superDigit: false, abbrSpace: true
+        }
+      }
     }
   ];
 
